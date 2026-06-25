@@ -10,4 +10,7 @@ export class SalvarTicketDto {
 
   // UUID do colaborador — opcional: só estará presente quando o tipo for 'Agendado'
   id_colaborador?: string;
+
+  // Nome do colaborador recebido pelo Kiosk — opcional: presente quando o tipo for 'Agendado'
+  nome?: string;
 }

@@ -7,6 +7,9 @@ import { SupabaseService } from '../../supabase/supabase.service';
 // Importa o DTO que define o formato do payload recebido pelo endpoint de processar ticket
 import { SalvarTicketDto } from './dto/salvar-ticket.dto';
 
+// Importa o Gateway de WebSockets
+import { TelaChamadaGateway } from './tela-chamada.gateway';
+
 // Marca a classe como um serviço injetável pelo NestJS
 @Injectable()
 export class ChamadasService {
@@ -14,7 +17,10 @@ export class ChamadasService {
   private readonly logger = new Logger(ChamadasService.name);
 
   // Injeta o SupabaseService via construtor para ter acesso ao cliente do banco
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor (
+    private readonly supabaseService: SupabaseService,
+    private readonly telaChamadaGateway: TelaChamadaGateway
+  ) {}
 
   // ─────────────────────────────────────────────────────────────────
   // ENDPOINT: POST /chamadas/tickets/processar
@@ -37,7 +43,7 @@ export class ChamadasService {
         );
       }
       // Busca as salas e insere na fila de agendamentos
-      return this.inserirFilaAgendamentos(dto.ticket, dto.id_colaborador);
+      return this.inserirFilaAgendamentos(dto.ticket, dto.id_colaborador, dto.nome);
     }
 
     // Retorna erro se o tipo enviado não for reconhecido
@@ -60,11 +66,14 @@ export class ChamadasService {
     // Insere uma linha na tabela fila_atendimentos na coluna ticket_id
     const { data, error } = await supabase
       .from('fila_atendimentos')
-      .insert({ ticket_id: ticket, disp: true })
+      .insert({ ticket_id: ticket, disp: true, sala: 'Recepção' })
       .select();
 
     // Lança um erro caso o Supabase retorne algum problema na operação
     if (error) throw new Error(`Erro ao inserir em fila_atendimentos: ${error.message}`);
+
+    // Emite o evento para a TV através do WebSocket
+    this.telaChamadaGateway.emitirChamadaSemAgendamento(ticket, 'Recepção');
 
     this.logger.log(`Ticket ${ticket} inserido com sucesso na fila_atendimentos`);
     return { mensagem: 'Ticket inserido na fila de atendimentos', data };
@@ -76,6 +85,7 @@ export class ChamadasService {
   private async inserirFilaAgendamentos(
     ticket: string,
     id_colaborador: string,
+    nome?: string, // Recebe o nome do colaborador
   ) {
     this.logger.log(
       `Buscando salas do colaborador ${id_colaborador} em agendamentos (compareceu = true)`,
@@ -110,6 +120,7 @@ export class ChamadasService {
       ticket_text: ticket,
       sala: agendamento.sala,
       disponivel: 0, // 0 = colaborador ainda não passou pela recepção
+      nome: nome, // Insere o nome do colaborador na fila de agendamentos
     }));
 
     // Insere todas as linhas de uma vez na tabela fila_agendamentos
@@ -145,9 +156,13 @@ export class ChamadasService {
       .select('created_at, disp')
       .eq('id', id)
       .eq('ticket_id', ticket_id)
-      .single();
+      .maybeSingle();
 
     if (errBusca) throw new Error(`Erro ao buscar dados para histórico: ${errBusca.message}`);
+    
+    if (!filaData) {
+      throw new NotFoundException(`Atendimento ID ${id} e ticket ${ticket_id} não encontrado na fila.`);
+    }
 
     // Regra: Verifica se já foi finalizado
     if (filaData.disp === false) {
@@ -285,6 +300,8 @@ export class ChamadasService {
 
     if (error) throw new Error(`Erro ao chamar na sala: ${error.message}`);
 
+    this.telaChamadaGateway.emitirChamadaAgendada(identificador, sala_id, filaDestaSala.nome);
+
     this.logger.log(`Ticket ${identificador} em atendimento na sala ${sala_id}`);
     return { mensagem: `Colaborador chamado para a sala ${sala_id}`, data };
   }
@@ -306,9 +323,13 @@ export class ChamadasService {
       .select('created_at, disponivel')
       .eq('ticket_text', identificador)
       .eq('sala', sala_id)
-      .single();
+      .maybeSingle();
 
     if (errBusca) throw new Error(`Erro ao buscar dados para histórico: ${errBusca.message}`);
+
+    if (!filaData) {
+      throw new NotFoundException(`Atendimento do ticket ${identificador} não encontrado na sala ${sala_id}.`);
+    }
 
     // Regra: Verifica se já foi finalizado
     if (Number(filaData.disponivel) === 3) {

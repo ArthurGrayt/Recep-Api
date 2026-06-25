@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <title>Teste da TV / WebSocket</title>
+</head>
+<body>
+    <h1>Abra o Console do Navegador (F12)</h1>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> 
+    
+    <script>
+        const socket = io('http://localhost:3002/tela-chamada'); // [1]
+
+        socket.on('connect', () => { 
+            console.log('TV Conectada ao servidor! Meu ID:', socket.id); // [2]
+        });
+
+        socket.on('nova_chamada_agendada', (dados) => { // [3]
+            console.log('MENSAGEM RECEBIDA DA API:', dados);
+            alert(`ATENÇÃO: Paciente ${dados.nome} (Ticket ${dados.ticket}) comparecer à Sala ${dados.sala}`); // [4]
+        });
+
+        socket.on('nova_chamada_recepcao', (dados) => { // [5]
+            console.log('CHAMADA RECEPÇÃO RECEBIDA:', dados);
+        });
+    </script>
+</body>
+</html>
