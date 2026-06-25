@@ -29,58 +29,111 @@ export class ChamadasController {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // PATCH /chamadas/fila/atendimentos/:id/:ticket_id
-  // Recepção finaliza o atendimento sem agendamento (soft-delete)
+  // POST /chamadas/recepcao/chamar-sem-agendamento/:id_ticket/:identificador
+  // Recepção chama o colaborador sem agendamento (TV + soft-delete)
   // ─────────────────────────────────────────────────────────────────
-  @Patch('fila/atendimentos/:id/:ticket_id')
-  finalizarAtendimentoRecepcao(
-    @Param('id') id: string,
-    @Param('ticket_id') ticket_id: string,
+  @Post('recepcao/chamar-sem-agendamento/:id_ticket/:identificador')
+  chamarSemAgendamentoRecepcao(
+    @Param('id_ticket') id_ticket: string,
+    @Param('identificador') identificador: string,
   ) {
-    this.logger.log(`PATCH /fila/atendimentos/${id}/${ticket_id}`);
-    return this.chamadasService.excluirDaFilaAtendimentos(Number(id), ticket_id);
+    this.logger.log(`POST /recepcao/chamar-sem-agendamento/${id_ticket}/${identificador}`);
+    return this.chamadasService.chamarSemAgendamentoRecepcao(Number(id_ticket), identificador);
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // POST /chamadas/recepcao/atender/:identificador
+  // POST /chamadas/recepcao/reverter-sem-agendamento/:id_ticket/:identificador
+  // Reverte a chamada sem agendamento e volta o colaborador para a fila
+  // ─────────────────────────────────────────────────────────────────
+  @Post('recepcao/reverter-sem-agendamento/:id_ticket/:identificador')
+  reverterSemAgendamentoRecepcao(
+    @Param('id_ticket') id_ticket: string,
+    @Param('identificador') identificador: string,
+  ) {
+    this.logger.log(`POST /recepcao/reverter-sem-agendamento/${id_ticket}/${identificador}`);
+    return this.chamadasService.reverterChamadaSemAgendamentoRecepcao(Number(id_ticket), identificador);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // POST /chamadas/recepcao/chamar/:id_ticket/:identificador
+  // Recepção chama o colaborador Agendado (Sala 1: 1 -> 2)
+  // ─────────────────────────────────────────────────────────────────
+  @Post('recepcao/chamar/:id_ticket/:identificador')
+  chamarNaRecepcao(
+    @Param('id_ticket') id_ticket: string,
+    @Param('identificador') identificador: string
+  ) {
+    this.logger.log(`POST /recepcao/chamar/${id_ticket}/${identificador}`);
+    return this.chamadasService.chamarAgendadoRecepcao(Number(id_ticket), identificador);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // POST /chamadas/recepcao/atender/:id_ticket/:identificador
   // Recepção conclui o atendimento presencial do colaborador (Agendado)
   // ─────────────────────────────────────────────────────────────────
-  @Post('recepcao/atender/:identificador')
-  atenderNaRecepcao(@Param('identificador') identificador: string) {
-    // Loga o ticket que está sendo atendido na recepção
-    this.logger.log(`POST /recepcao/atender/${identificador}`);
-    // Passa a string inteira para o service (ex: "AG001")
-    return this.chamadasService.atenderNaRecepcao(identificador);
+  @Post('recepcao/atender/:id_ticket/:identificador')
+  atenderNaRecepcao(
+    @Param('id_ticket') id_ticket: string,
+    @Param('identificador') identificador: string
+  ) {
+    this.logger.log(`POST /recepcao/atender/${id_ticket}/${identificador}`);
+    return this.chamadasService.atenderNaRecepcao(Number(id_ticket), identificador);
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // POST /chamadas/sala/:sala_id/chamar/:identificador
+  // POST /chamadas/sala/:sala_id/chamar/:id_ticket/:identificador
   // Sala chama o colaborador para atendimento (disponivel: 1 → 2)
   // ─────────────────────────────────────────────────────────────────
-  @Post('sala/:sala_id/chamar/:identificador')
+  @Post('sala/:sala_id/chamar/:id_ticket/:identificador')
   chamarNaSala(
     @Param('sala_id') sala_id: string,
+    @Param('id_ticket') id_ticket: string,
     @Param('identificador') identificador: string,
   ) {
-    // Loga qual sala está chamando qual ticket
-    this.logger.log(`POST /sala/${sala_id}/chamar/${identificador}`);
-    // Converte a sala para número e passa o identificador de string para o service
-    return this.chamadasService.chamarNaSala(Number(sala_id), identificador);
+    this.logger.log(`POST /sala/${sala_id}/chamar/${id_ticket}/${identificador}`);
+    return this.chamadasService.chamarNaSala(Number(sala_id), Number(id_ticket), identificador);
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // POST /chamadas/sala/:sala_id/finalizar/:identificador
+  // POST /chamadas/sala/:sala_id/finalizar/:id_ticket/:identificador
   // Sala finaliza o atendimento e remove o colaborador da fila
   // ─────────────────────────────────────────────────────────────────
-  @Post('sala/:sala_id/finalizar/:identificador')
+  @Post('sala/:sala_id/finalizar/:id_ticket/:identificador')
   finalizarNaSala(
     @Param('sala_id') sala_id: string,
+    @Param('id_ticket') id_ticket: string,
     @Param('identificador') identificador: string,
   ) {
-    // Loga qual sala está finalizando qual ticket
-    this.logger.log(`POST /sala/${sala_id}/finalizar/${identificador}`);
-    // Converte a sala para número e passa o identificador de string para o service
-    return this.chamadasService.finalizarNaSala(Number(sala_id), identificador);
+    this.logger.log(`POST /sala/${sala_id}/finalizar/${id_ticket}/${identificador}`);
+    return this.chamadasService.finalizarNaSala(Number(sala_id), Number(id_ticket), identificador);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // POST /chamadas/sala/:sala_id/reverter-chamada/:id_ticket/:identificador
+  // Reverte um "Chamar" equivocado (2 -> 1)
+  // ─────────────────────────────────────────────────────────────────
+  @Post('sala/:sala_id/reverter-chamada/:id_ticket/:identificador')
+  reverterChamada(
+    @Param('sala_id') sala_id: string,
+    @Param('id_ticket') id_ticket: string,
+    @Param('identificador') identificador: string,
+  ) {
+    this.logger.log(`POST /sala/${sala_id}/reverter-chamada/${id_ticket}/${identificador}`);
+    return this.chamadasService.reverterChamadaNaSala(Number(sala_id), Number(id_ticket), identificador);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // POST /chamadas/sala/:sala_id/reverter-finalizacao/:id_ticket/:identificador
+  // Reverte uma Finalização equivocada (3 -> 2)
+  // ─────────────────────────────────────────────────────────────────
+  @Post('sala/:sala_id/reverter-finalizacao/:id_ticket/:identificador')
+  reverterFinalizacao(
+    @Param('sala_id') sala_id: string,
+    @Param('id_ticket') id_ticket: string,
+    @Param('identificador') identificador: string,
+  ) {
+    this.logger.log(`POST /sala/${sala_id}/reverter-finalizacao/${id_ticket}/${identificador}`);
+    return this.chamadasService.reverterFinalizacaoNaSala(Number(sala_id), Number(id_ticket), identificador);
   }
 
   // ─────────────────────────────────────────────────────────────────

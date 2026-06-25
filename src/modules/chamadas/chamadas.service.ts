@@ -72,10 +72,7 @@ export class ChamadasService {
     // Lança um erro caso o Supabase retorne algum problema na operação
     if (error) throw new Error(`Erro ao inserir em fila_atendimentos: ${error.message}`);
 
-    // Emite o evento para a TV através do WebSocket
-    this.telaChamadaGateway.emitirChamadaSemAgendamento(ticket, 'Recepção');
-
-    this.logger.log(`Ticket ${ticket} inserido com sucesso na fila_atendimentos`);
+    this.logger.log(`Ticket ${ticket} inserido com sucesso na fila_atendimentos (Aguardando Recepção)`);
     return { mensagem: 'Ticket inserido na fila de atendimentos', data };
   }
 
@@ -117,13 +114,29 @@ export class ChamadasService {
     );
 
     // Monta o array de objetos para inserção em massa, uma linha por sala
-    const linhasDaFila = salas.map((agendamento) => ({
+    const linhasDaFila = [];
+
+    // Adiciona a sala 1 (Recepção) com disponivel = 1
+    linhasDaFila.push({
       ticket_text: ticket,
-      sala: agendamento.sala,
-      disponivel: 0, // 0 = colaborador ainda não passou pela recepção
-      nome: nome, // Insere o nome do colaborador na fila de agendamentos
-      id_ticket: id_ticket, // Insere o ID original da tabela ticket_chamadas
-    }));
+      sala: 1,
+      disponivel: 1, // 1 = disponível para ser chamado na recepção
+      nome: nome,
+      id_ticket: id_ticket,
+    });
+
+    // Adiciona as salas médicas com disponivel = 0
+    salas.forEach((agendamento) => {
+      if (Number(agendamento.sala) !== 1) {
+        linhasDaFila.push({
+          ticket_text: ticket,
+          sala: agendamento.sala,
+          disponivel: 0, // 0 = colaborador ainda não passou pela recepção
+          nome: nome,
+          id_ticket: id_ticket,
+        });
+      }
+    });
 
     // Insere todas as linhas de uma vez na tabela fila_agendamentos
     const { data, error: erroInsert } = await supabase
@@ -144,117 +157,165 @@ export class ChamadasService {
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // ENDPOINT: DELETE /chamadas/fila/atendimentos/:id/:ticket_id
-  // Recepção finaliza atendimento "Sem agendamento" deletando da fila
+  // ENDPOINT: POST /chamadas/recepcao/chamar-sem-agendamento/:id_ticket/:identificador
+  // Recepção chama o colaborador "Sem agendamento", exibe na TV e finaliza da fila (disp = false)
   // ─────────────────────────────────────────────────────────────────
-  async excluirDaFilaAtendimentos(id: number, ticket_id: string) {
-    this.logger.log(`Deletando ticket ${ticket_id} (ID da fila: ${id}) de fila_atendimentos e arquivando no histórico`);
+  async chamarSemAgendamentoRecepcao(id_ticket: number, identificador: string) {
+    this.logger.log(`Recepção chamando ticket sem agendamento ${identificador} (ID_Ticket: ${id_ticket})`);
 
     const supabase = this.supabaseService.getClient();
 
-    // 1. Busca os dados da fila antes de deletar para salvar no histórico
+    // 1. Busca os dados da fila antes de deletar
     const { data: filaData, error: errBusca } = await supabase
       .from('fila_atendimentos')
       .select('created_at, disp')
-      .eq('id', id)
-      .eq('ticket_id', ticket_id)
+      .eq('id_ticket', id_ticket)
+      .eq('ticket_id', identificador)
       .maybeSingle();
 
-    if (errBusca) throw new Error(`Erro ao buscar dados para histórico: ${errBusca.message}`);
+    if (errBusca) throw new Error(`Erro ao buscar dados: ${errBusca.message}`);
     
     if (!filaData) {
-      throw new NotFoundException(`Atendimento ID ${id} e ticket ${ticket_id} não encontrado na fila.`);
+      throw new NotFoundException(`Atendimento ID do ticket ${id_ticket} e ticket ${identificador} não encontrado na fila.`);
     }
 
     // Regra: Verifica se já foi finalizado
     if (filaData.disp === false) {
-      const msgErro = `O atendimento do ticket ${ticket_id} já foi finalizado na recepção anteriormente.`;
+      const msgErro = `O atendimento do ticket ${identificador} já foi finalizado na recepção anteriormente.`;
       this.logger.warn(msgErro);
       throw new BadRequestException(msgErro);
     }
 
-    // 2. Salva no histórico de atendimentos
-    const { error: errHist } = await supabase
-      .from('historico_atendimentos')
-      .insert({
-        ticket_text: ticket_id,
-        tipo: 'Sem agendamento',
-        local_atendimento: 'Recepção',
-        entrou_na_fila_em: filaData.created_at,
-      });
-
-    if (errHist) this.logger.error(`Erro ao salvar no histórico: ${errHist.message}`);
-
     // 3. Executa a atualização da fila (soft-delete) marcando como disp = false
     const { error } = await supabase
       .from('fila_atendimentos')
-      .update({ disp: false })
-      .eq('id', id)
-      .eq('ticket_id', ticket_id);
+      .update({ 
+        disp: false,
+        chamado_em: new Date().toISOString()
+      })
+      .eq('id_ticket', id_ticket)
+      .eq('ticket_id', identificador);
 
-    if (error) throw new Error(`Erro ao finalizar atendimento: ${error.message}`);
+    if (error) throw new Error(`Erro ao chamar atendimento sem agendamento: ${error.message}`);
 
-    return { mensagem: 'Atendimento sem agendamento finalizado na recepção e salvo no histórico' };
+    // Emite o evento para a TV através do WebSocket (Aviso visual para o colaborador ir ao balcão)
+    this.telaChamadaGateway.emitirChamadaSemAgendamento(identificador, 'Recepção');
+
+    return { mensagem: 'Atendimento sem agendamento chamado na recepção com sucesso' };
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // ENDPOINT: POST /chamadas/recepcao/atender/:identificador
-  // Recepção atende o colaborador Agendado: atualiza fila_agendamentos
+  // ENDPOINT: POST /chamadas/recepcao/reverter-sem-agendamento/:id_ticket/:identificador
+  // Reverte um "Chamar" equivocado para sem agendamento (volta a aparecer na fila)
   // ─────────────────────────────────────────────────────────────────
-  async atenderNaRecepcao(identificador: string) {
-    this.logger.log(`Recepção confirmando ticket agendado ${identificador}`);
+  async reverterChamadaSemAgendamentoRecepcao(id_ticket: number, identificador: string) {
+    this.logger.log(`Revertendo chamada sem agendamento do ticket ${identificador} (ID_Ticket: ${id_ticket})`);
 
     const supabase = this.supabaseService.getClient();
 
-    // Atualiza todas as linhas desse ticket de disponivel = 0 para disponivel = 1
+    const { error } = await supabase
+      .from('fila_atendimentos')
+      .update({ 
+        disp: true,
+        chamado_em: null
+      })
+      .eq('id_ticket', id_ticket)
+      .eq('ticket_id', identificador)
+      .eq('disp', false); // Só reverte se realmente já foi chamado
+
+    if (error) throw new Error(`Erro ao reverter chamada sem agendamento: ${error.message}`);
+
+    return { mensagem: 'Chamada sem agendamento revertida. O colaborador voltou a aguardar.' };
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+  // ─────────────────────────────────────────────────────────────────
+  // ENDPOINT: POST /chamadas/recepcao/chamar/:id_ticket/:identificador
+  // Recepção chama o colaborador Agendado (Sala 1: 1 -> 2)
+  // ─────────────────────────────────────────────────────────────────
+  async chamarAgendadoRecepcao(id_ticket: number, identificador: string) {
+    this.logger.log(`Recepção chamando ticket agendado ${identificador} (ID: ${id_ticket})`);
+    // A Recepção agora é tratada internamente como a sala 1
+    // Reutiliza toda a lógica de segurança e validação já existente
+    return this.chamarNaSala(1, id_ticket, identificador);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ENDPOINT: POST /chamadas/recepcao/atender/:id_ticket/:identificador
+  // Recepção atende o colaborador Agendado: atualiza fila_agendamentos
+  // ─────────────────────────────────────────────────────────────────
+  async atenderNaRecepcao(id_ticket: number, identificador: string) {
+    this.logger.log(`Recepção finalizando ticket agendado ${identificador} (ID: ${id_ticket}) e liberando para salas`);
+
+    const supabase = this.supabaseService.getClient();
+
+    // 1. Marca a sala 1 (Recepção) como finalizada (3) e salva no histórico
+    // Podemos reutilizar o método de finalizar, que já cria o histórico
+    await this.finalizarNaSala(1, id_ticket, identificador);
+
+    // 2. Libera as outras salas médicas de 0 para 1
     const { data, error } = await supabase
       .from('fila_agendamentos')
       .update({ disponivel: 1 })
-      .eq('ticket_text', identificador)
+      .eq('id_ticket', id_ticket)
+      .neq('sala', 1)
       .eq('disponivel', 0)
       .select();
 
-    if (error) throw new Error(`Erro ao atualizar fila_agendamentos: ${error.message}`);
+    if (error) throw new Error(`Erro ao liberar salas médicas: ${error.message}`);
 
     this.logger.log(
-      `Ticket ${identificador} liberado para as salas (disponivel = 1)`,
+      `Ticket ${identificador} finalizado na recepção e liberado para as salas médicas`,
     );
     return {
-      mensagem: 'Colaborador agendado confirmado na recepção. Disponível para chamada nas salas.',
+      mensagem: 'Colaborador agendado finalizado na recepção e liberado para as salas.',
       data,
     };
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // ENDPOINT: POST /chamadas/sala/:sala_id/chamar/:identificador
+  // ENDPOINT: POST /chamadas/sala/:sala_id/chamar/:id_ticket/:identificador
   // Sala chama o colaborador: atualiza disponivel de 1 para 2 (em atendimento)
   // ─────────────────────────────────────────────────────────────────
-  async chamarNaSala(sala_id: number, identificador: string) {
-    this.logger.log(`Sala ${sala_id} tentando chamar ticket ${identificador}`);
+  async chamarNaSala(sala_id: number, id_ticket: number, identificador: string) {
+    this.logger.log(`Sala ${sala_id} tentando chamar ticket ${identificador} (ID: ${id_ticket})`);
 
     const supabase = this.supabaseService.getClient();
 
-    // 0. Regra Nova: Uma sala não pode chamar ninguém se já estiver com alguém em atendimento
-    const { data: ocupantesSala, error: errSala } = await supabase
-      .from('fila_agendamentos')
-      .select('id')
-      .eq('sala', sala_id)
-      .eq('disponivel', 2)
-      .limit(1);
+    // 0. Regra Nova: Uma sala médica não pode chamar ninguém se já estiver com alguém em atendimento
+    // A Recepção (sala 1) está isenta dessa regra e pode chamar múltiplos colaboradores
+    if (sala_id !== 1) {
+      const { data: ocupantesSala, error: errSala } = await supabase
+        .from('fila_agendamentos')
+        .select('id')
+        .eq('sala', sala_id)
+        .eq('disponivel', 2)
+        .limit(1);
 
-    if (errSala) throw new Error(`Erro ao verificar status da sala: ${errSala.message}`);
+      if (errSala) throw new Error(`Erro ao verificar status da sala: ${errSala.message}`);
 
-    if (ocupantesSala && ocupantesSala.length > 0) {
-      const msgErro = `A sala ${sala_id} já está atendendo um colaborador. Finalize o atendimento atual antes de chamar o próximo.`;
-      this.logger.warn(msgErro);
-      throw new BadRequestException(msgErro); // Bloqueia a execução com status 400 e exibe a mensagem
+      if (ocupantesSala && ocupantesSala.length > 0) {
+        const msgErro = `A sala ${sala_id} já está atendendo um colaborador. Finalize o atendimento atual antes de chamar o próximo.`;
+        this.logger.warn(msgErro);
+        throw new BadRequestException(msgErro);
+      }
     }
 
     // 1. Busca todas as filas desse ticket
     const { data: filas, error: errBusca } = await supabase
       .from('fila_agendamentos')
       .select('*')
-      .eq('ticket_text', identificador);
+      .eq('id_ticket', id_ticket);
 
     if (errBusca) throw new Error(`Erro ao buscar validações: ${errBusca.message}`);
 
@@ -295,26 +356,33 @@ export class ChamadasService {
     // 4. Se passou pelas validações, faz o update para disponivel = 2 (em atendimento)
     const { data, error } = await supabase
       .from('fila_agendamentos')
-      .update({ disponivel: 2 })
-      .eq('ticket_text', identificador)
+      .update({ 
+        disponivel: 2, 
+        chamado_em: new Date().toISOString() 
+      })
+      .eq('id_ticket', id_ticket)
       .eq('sala', sala_id)
       .select();
 
     if (error) throw new Error(`Erro ao chamar na sala: ${error.message}`);
 
-    this.telaChamadaGateway.emitirChamadaAgendada(identificador, sala_id, filaDestaSala.nome);
+    if (sala_id === 1) {
+      this.telaChamadaGateway.emitirChamadaSemAgendamento(identificador, 'Recepção', filaDestaSala.nome);
+    } else {
+      this.telaChamadaGateway.emitirChamadaAgendada(identificador, sala_id, filaDestaSala.nome);
+    }
 
     this.logger.log(`Ticket ${identificador} em atendimento na sala ${sala_id}`);
     return { mensagem: `Colaborador chamado para a sala ${sala_id}`, data };
   }
 
   // ─────────────────────────────────────────────────────────────────
-  // ENDPOINT: POST /chamadas/sala/:sala_id/finalizar/:identificador
+  // ENDPOINT: POST /chamadas/sala/:sala_id/finalizar/:id_ticket/:identificador
   // Sala finaliza o atendimento: deleta a linha correspondente
   // ─────────────────────────────────────────────────────────────────
-  async finalizarNaSala(sala_id: number, identificador: string) {
+  async finalizarNaSala(sala_id: number, id_ticket: number, identificador: string) {
     this.logger.log(
-      `Sala ${sala_id} finalizando atendimento do ticket ${identificador} e arquivando no histórico`,
+      `Sala ${sala_id} finalizando atendimento do ticket ${identificador} (ID: ${id_ticket})`,
     );
 
     const supabase = this.supabaseService.getClient();
@@ -323,7 +391,7 @@ export class ChamadasService {
     const { data: filaData, error: errBusca } = await supabase
       .from('fila_agendamentos')
       .select('created_at, disponivel')
-      .eq('ticket_text', identificador)
+      .eq('id_ticket', id_ticket)
       .eq('sala', sala_id)
       .maybeSingle();
 
@@ -340,44 +408,16 @@ export class ChamadasService {
       throw new BadRequestException(msgErro);
     }
 
-    // 2. Busca o UUID do colaborador diretamente na tabela de tickets originais
-    const { data: ticketData, error: errTicket } = await supabase
-      .from('ticket_chamadas')
-      .select('*')
-      .eq('ticket', identificador)
-      .maybeSingle();
-
-    if (errTicket) {
-      this.logger.error(`Erro ao buscar na ticket_chamadas: ${errTicket.message}`);
-    } else {
-      this.logger.log(`Dados encontrados em ticket_chamadas: ${JSON.stringify(ticketData)}`);
-    }
-
-    // Tenta pegar id_colaborador ou colaborador_id
-    const uuidEncontrado = ticketData ? (ticketData.id_colaborador || ticketData.colaborador_id) : null;
-
-    if (!uuidEncontrado) {
-      this.logger.warn(`UUID do colaborador NÃO encontrado para o ticket ${identificador}! ticketData retornado: ${JSON.stringify(ticketData)}`);
-    }
-
-    // 3. Salva no histórico de atendimentos
-    const { error: errHist } = await supabase
-      .from('historico_atendimentos')
-      .insert({
-        ticket_text: identificador,
-        tipo: 'Agendado',
-        local_atendimento: `Sala ${sala_id}`,
-        entrou_na_fila_em: filaData.created_at,
-        uuid_colaborador: uuidEncontrado,
-      });
-
-    if (errHist) this.logger.error(`Erro ao salvar no histórico: ${errHist.message}`);
+    // (O histórico de atendimentos foi desativado conforme regras do negócio)
 
     // 3. Em vez de deletar, atualiza a linha específica marcando como disponivel = 3 (Finalizado)
     const { error } = await supabase
       .from('fila_agendamentos')
-      .update({ disponivel: 3 })
-      .eq('ticket_text', identificador)
+      .update({ 
+        disponivel: 3, 
+        finalizado_em: new Date().toISOString() 
+      })
+      .eq('id_ticket', id_ticket)
       .eq('sala', sala_id);
 
     if (error) throw new Error(`Erro ao finalizar atendimento na sala: ${error.message}`);
@@ -437,5 +477,65 @@ export class ChamadasService {
       `${data?.length ?? 0} ticket(s) disponível(is) na sala ${sala_id}`,
     );
     return data;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ENDPOINT: POST /chamadas/sala/:sala_id/reverter-chamada/:id_ticket/:identificador
+  // Reverte um "Chamar" equivocado (2 -> 1)
+  // ─────────────────────────────────────────────────────────────────
+  async reverterChamadaNaSala(sala_id: number, id_ticket: number, identificador: string) {
+    this.logger.log(`Revertendo chamada na sala ${sala_id} do ticket ${identificador} (ID: ${id_ticket})`);
+    const supabase = this.supabaseService.getClient();
+
+    const { error } = await supabase
+      .from('fila_agendamentos')
+      .update({ 
+        disponivel: 1, 
+        chamado_em: null 
+      })
+      .eq('id_ticket', id_ticket)
+      .eq('sala', sala_id)
+      .eq('disponivel', 2);
+
+    if (error) throw new Error(`Erro ao reverter chamada: ${error.message}`);
+
+    return { mensagem: 'Chamada revertida com sucesso. O colaborador voltou a aguardar.' };
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ENDPOINT: POST /chamadas/sala/:sala_id/reverter-finalizacao/:id_ticket/:identificador
+  // Reverte uma Finalização equivocada (3 -> 2). Na recepção, também re-bloqueia as salas.
+  // ─────────────────────────────────────────────────────────────────
+  async reverterFinalizacaoNaSala(sala_id: number, id_ticket: number, identificador: string) {
+    this.logger.log(`Revertendo finalização na sala ${sala_id} do ticket ${identificador} (ID: ${id_ticket})`);
+    const supabase = this.supabaseService.getClient();
+
+    // 1. Volta a sala específica de 3 para 2
+    const { error } = await supabase
+      .from('fila_agendamentos')
+      .update({ 
+        disponivel: 2, 
+        finalizado_em: null 
+      })
+      .eq('id_ticket', id_ticket)
+      .eq('sala', sala_id)
+      .eq('disponivel', 3);
+
+    if (error) throw new Error(`Erro ao reverter finalização: ${error.message}`);
+
+    // 2. Se for a Recepção (Sala 1), precisa re-bloquear as salas médicas (1 -> 0)
+    if (sala_id === 1) {
+      this.logger.log(`Recepção revertida: re-bloqueando salas médicas do ticket ${identificador}`);
+      const { error: errBloqueio } = await supabase
+        .from('fila_agendamentos')
+        .update({ disponivel: 0 })
+        .eq('id_ticket', id_ticket)
+        .neq('sala', 1)
+        .eq('disponivel', 1);
+
+      if (errBloqueio) throw new Error(`Erro ao re-bloquear salas médicas: ${errBloqueio.message}`);
+    }
+
+    return { mensagem: 'Finalização revertida com sucesso. O colaborador voltou para em atendimento.' };
   }
 }
