@@ -34,7 +34,7 @@ export class ChamadasService {
     // Verifica o tipo do ticket e chama o método correspondente
     if (dto.tipo === 'Sem agendamento') {
       // Sem agendamento: insere direto na fila da recepção usando o código de texto (ex: SA001)
-      return this.inserirFilaAtendimentos(dto.ticket);
+      return this.inserirFilaAtendimentos(dto.ticket, dto.id_ticket);
     } else if (dto.tipo === 'Agendado') {
       // Agendado: precisa do uuid do colaborador para buscar as salas
       if (!dto.id_colaborador) {
@@ -43,7 +43,7 @@ export class ChamadasService {
         );
       }
       // Busca as salas e insere na fila de agendamentos
-      return this.inserirFilaAgendamentos(dto.ticket, dto.id_colaborador, dto.nome);
+      return this.inserirFilaAgendamentos(dto.ticket, dto.id_colaborador, dto.id_ticket, dto.nome);
     }
 
     // Retorna erro se o tipo enviado não for reconhecido
@@ -55,7 +55,7 @@ export class ChamadasService {
   // ─────────────────────────────────────────────────────────────────
   // Caminho "Sem agendamento": insere na fila_atendimentos com disp = true
   // ─────────────────────────────────────────────────────────────────
-  private async inserirFilaAtendimentos(ticket: string) {
+  private async inserirFilaAtendimentos(ticket: string, id_ticket: number) {
     this.logger.log(
       `Inserindo ticket ${ticket} na fila_atendimentos (disp = true)`,
     );
@@ -66,7 +66,7 @@ export class ChamadasService {
     // Insere uma linha na tabela fila_atendimentos na coluna ticket_id
     const { data, error } = await supabase
       .from('fila_atendimentos')
-      .insert({ ticket_id: ticket, disp: true, sala: 'Recepção' })
+      .insert({ ticket_id: ticket, disp: true, sala: 'Recepção', id_ticket: id_ticket })
       .select();
 
     // Lança um erro caso o Supabase retorne algum problema na operação
@@ -85,6 +85,7 @@ export class ChamadasService {
   private async inserirFilaAgendamentos(
     ticket: string,
     id_colaborador: string,
+    id_ticket: number, // Chave estrangeira
     nome?: string, // Recebe o nome do colaborador
   ) {
     this.logger.log(
@@ -121,6 +122,7 @@ export class ChamadasService {
       sala: agendamento.sala,
       disponivel: 0, // 0 = colaborador ainda não passou pela recepção
       nome: nome, // Insere o nome do colaborador na fila de agendamentos
+      id_ticket: id_ticket, // Insere o ID original da tabela ticket_chamadas
     }));
 
     // Insere todas as linhas de uma vez na tabela fila_agendamentos
