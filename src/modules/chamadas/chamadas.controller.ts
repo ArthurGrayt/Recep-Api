@@ -159,4 +159,16 @@ export class ChamadasController {
     // Converte sala_id de string para número e delega ao service
     return this.chamadasService.getFilaAgendamentos(Number(sala_id));
   }
+
+  // ─────────────────────────────────────────────────────────────────
+  // GET /chamadas/fila/todos
+  // Retorna todos os atendimentos reunindo fila_atendimentos e fila_agendamentos
+  // ─────────────────────────────────────────────────────────────────
+  @Get('fila/todos')
+  getTodosAtendimentos() {
+    // Loga a chegada da requisição de leitura de todos os atendimentos
+    this.logger.log('GET /fila/todos');
+    // Delega ao service a busca das duas filas simultaneamente
+    return this.chamadasService.getTodosAtendimentos();
+  }
 }

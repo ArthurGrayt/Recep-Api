@@ -510,6 +510,27 @@ export class ChamadasService {
     this.logger.log(`Revertendo finalização na sala ${sala_id} do ticket ${identificador} (ID: ${id_ticket})`);
     const supabase = this.supabaseService.getClient();
 
+    // 0. Regra de Segurança: Verifica se já existe outro colaborador em atendimento (disponivel = 2) nesta sala
+    // A Recepção (sala 1) está isenta, pois pode atender múltiplos colaboradores simultaneamente
+    if (sala_id !== 1) {
+      const { data: ocupantes, error: errOcupante } = await supabase
+        .from('fila_agendamentos')
+        .select('id, ticket_text')
+        .eq('sala', sala_id)
+        .eq('disponivel', 2) // Verifica se há alguém com status "em atendimento"
+        .neq('id_ticket', id_ticket) // Ignora o próprio ticket que está sendo revertido
+        .limit(1);
+
+      if (errOcupante) throw new Error(`Erro ao verificar ocupação da sala: ${errOcupante.message}`);
+
+      // Se a consulta retornou algum registro, a sala está ocupada — bloqueia a reversão
+      if (ocupantes && ocupantes.length > 0) {
+        const msgErro = `Não é possível reverter. A sala ${sala_id} já está atendendo o colaborador de ticket ${ocupantes[0].ticket_text}. Finalize o atendimento atual antes de reverter.`;
+        this.logger.warn(msgErro);
+        throw new BadRequestException(msgErro);
+      }
+    }
+
     // 1. Volta a sala específica de 3 para 2
     const { error } = await supabase
       .from('fila_agendamentos')
@@ -537,5 +558,115 @@ export class ChamadasService {
     }
 
     return { mensagem: 'Finalização revertida com sucesso. O colaborador voltou para em atendimento.' };
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // ENDPOINT: GET /chamadas/fila/todos
+  // Retorna todos os atendimentos, reunindo dados das duas filas (agendados e não agendados)
+  // ─────────────────────────────────────────────────────────────────
+  async getTodosAtendimentos() {
+    this.logger.log('Buscando todos os atendimentos (fila_atendimentos e fila_agendamentos)');
+
+    // Obtém o cliente Supabase
+    const supabase = this.supabaseService.getClient();
+
+    // Busca todos os registros da fila_atendimentos (ordenados por criação)
+    const { data: atendimentos, error: erroAtendimentos } = await supabase
+      .from('fila_atendimentos')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    // Lança um erro se a consulta da fila_atendimentos falhar
+    if (erroAtendimentos) {
+      throw new Error(`Erro ao buscar fila_atendimentos: ${erroAtendimentos.message}`);
+    }
+
+    // Busca todos os registros da fila_agendamentos (ordenados por criação)
+    const { data: agendamentos, error: erroAgendamentos } = await supabase
+      .from('fila_agendamentos')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    // Lança um erro se a consulta da fila_agendamentos falhar
+    if (erroAgendamentos) {
+      throw new Error(`Erro ao buscar fila_agendamentos: ${erroAgendamentos.message}`);
+    }
+
+    this.logger.log(`Foram encontrados ${atendimentos?.length ?? 0} tickets sem agendamento e ${agendamentos?.length ?? 0} tickets agendados.`);
+
+    // 1. Padroniza a fila de atendimentos (sem agendamento)
+    const atendimentosFormatados = atendimentos.map(item => ({
+      id: item.id,
+      ticket_id: item.ticket_id,
+      created_at: item.created_at,
+      sala: item.sala,
+      status: item.disp, // Mapeado de 'disp'
+      tipo_fila: 'fila_atendimentos',
+      id_ticket: item.id_ticket,
+      salas_agendadas: [] // Atendimentos sem agendamento não possuem múltiplas salas
+    }));
+
+    // 2. Padroniza e agrupa a fila de agendamentos pelo id_ticket
+    // Para não retornar o mesmo colaborador várias vezes (uma para cada sala)
+    const agendamentosAgrupadosMap = agendamentos.reduce((acc, curr) => {
+      if (!acc[curr.id_ticket]) {
+        // Inicializa o objeto padronizado com os dados da primeira linha lida
+        acc[curr.id_ticket] = {
+          id: curr.id,
+          ticket_id: curr.ticket_text, // Mapeado de 'ticket_text'
+          created_at: curr.created_at,
+          sala: curr.sala,
+          status: curr.disponivel, // Mapeado de 'disponivel'
+          tipo_fila: 'fila_agendamentos',
+          id_ticket: curr.id_ticket,
+          nome: curr.nome, // Inclui o nome do colaborador
+          salas_agendadas: [] // Array para guardar todas as salas deste colaborador
+        };
+      }
+      
+      // Adiciona o status específico desta sala no array do colaborador
+      acc[curr.id_ticket].salas_agendadas.push({
+        sala: curr.sala,
+        status: curr.disponivel
+      });
+
+      // Lógica opcional: Se houver uma sala em atendimento (2) ou aguardando (1), atualiza a sala/status principal
+      if (curr.disponivel === 2 || (curr.disponivel === 1 && acc[curr.id_ticket].status === 0)) {
+        acc[curr.id_ticket].sala = curr.sala;
+        acc[curr.id_ticket].status = curr.disponivel;
+      }
+
+      return acc;
+    }, {} as Record<string, any>);
+
+    const agendamentosFormatados = Object.values(agendamentosAgrupadosMap);
+
+    // Função de ordenação atualizada para os novos campos padronizados
+    // 1º Critério: Prioridade (se o ticket_id tiver a letra 'P')
+    // 2º Critério: Ordem de chegada (created_at)
+    const ordenarPorPrioridadeEData = (a: any, b: any) => {
+      const ticketA = (a.ticket_id || '').toUpperCase();
+      const ticketB = (b.ticket_id || '').toUpperCase();
+
+      const isPriorityA = ticketA.includes('P');
+      const isPriorityB = ticketB.includes('P');
+
+      if (isPriorityA && !isPriorityB) return -1;
+      if (!isPriorityA && isPriorityB) return 1;
+
+      const dataA = new Date(a.created_at).getTime();
+      const dataB = new Date(b.created_at).getTime();
+
+      return dataA - dataB;
+    };
+
+    // Cria a lista unificada com os dados padronizados e a ordena
+    const todosReunidos = [
+      ...atendimentosFormatados,
+      ...agendamentosFormatados
+    ].sort(ordenarPorPrioridadeEData);
+
+    // Retorna a lista totalmente reunida e ordenada
+    return todosReunidos;
   }
 }

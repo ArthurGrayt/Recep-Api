@@ -16,6 +16,10 @@ import { ChamadasModule } from './modules/chamadas/chamadas.module';
 
 // Importa o módulo global do Supabase — disponibiliza o cliente de banco para toda a aplicação
 import { SupabaseModule } from './supabase/supabase.module';
+import { UsuariosModule } from './modules/usuarios/usuarios.module';
+
+// Importa o módulo MenuModule para disponibilizar a rota de menu
+import { MenuModule } from './modules/menu/menu.module';
 
 // Declara o módulo raiz da aplicação (AppModule)
 // Este é o ponto central onde todos os módulos são registrados
@@ -26,6 +30,9 @@ import { SupabaseModule } from './supabase/supabase.module';
     // SupabaseModule é global (@Global), então basta importar aqui uma vez
     SupabaseModule,
     ChamadasModule,
+    UsuariosModule,
+    // Registra o MenuModule na aplicação
+    MenuModule,
   ],
 
   // Registra os controllers padrão da aplicação

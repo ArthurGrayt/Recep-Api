@@ -10,6 +10,9 @@ async function bootstrap() {
   // Inicializa a aplicação NestJS com o AppModule raiz
   const app = await NestFactory.create(AppModule);
 
+  // Habilita CORS para permitir que o Front-end (Next.js) acesse a API
+  app.enableCors();
+
   // Define a porta a partir das variáveis de ambiente (.env) ou assume a porta 3000
   const port = process.env.PORT ?? 3002;
 
