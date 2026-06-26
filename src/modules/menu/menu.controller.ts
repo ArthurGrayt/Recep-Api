@@ -11,9 +11,9 @@ export class MenuController {
 
   // Define um endpoint do tipo GET com um parâmetro de rota ':id'
   @Get(':id')
-  // Método getMenu recebe o id a partir da URL usando o decorator @Param
-  getMenu(@Param('id') id: string) {
-    // Chama o serviço getMenu passando o id e retorna o resultado formatado como JSON
-    return this.menuService.getMenu(id);
+  // Método getMenu assíncrono que recebe o id a partir da URL usando o decorator @Param
+  async getMenu(@Param('id') id: string) {
+    // Chama o serviço getMenu (que busca no Supabase) passando o id e retorna o resultado
+    return await this.menuService.getMenu(id);
   }
 }
