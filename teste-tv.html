@@ -1,17 +1,19 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <title>Teste da TV / WebSocket</title>
 </head>
+
 <body>
     <h1>Abra o Console do Navegador (F12)</h1>
 
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script> 
-    
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
     <script>
         const socket = io('https://recep-api.vercel.app/tela-chamada'); // [1]
 
-        socket.on('connect', () => { 
+        socket.on('connect', () => {
             console.log('TV Conectada ao servidor! Meu ID:', socket.id); // [2]
         });
 
@@ -25,4 +27,5 @@
         });
     </script>
 </body>
+
 </html>

@@ -198,6 +198,22 @@ export class ChamadasService {
 
     if (error) throw new Error(`Erro ao chamar atendimento sem agendamento: ${error.message}`);
 
+    // Insere o registro na tabela gamatela_chamadas
+    const { error: errorGamatela } = await supabase
+      .from('gamatela_chamadas')
+      .insert({
+        ticket: identificador,
+        sala: 'Sala 1 - Recepção',
+        ticket_id: id_ticket,
+        nome: null
+      });
+
+    if (errorGamatela) {
+      const msgErro = `Erro ao salvar o registro da chamada na TV: ${errorGamatela.message}`;
+      this.logger.error(msgErro);
+      throw new BadRequestException(msgErro);
+    }
+
     // Emite o evento para a TV através do WebSocket (Aviso visual para o colaborador ir ao balcão)
     this.telaChamadaGateway.emitirChamadaSemAgendamento(identificador, 'Recepção');
 
@@ -365,6 +381,35 @@ export class ChamadasService {
       .select();
 
     if (error) throw new Error(`Erro ao chamar na sala: ${error.message}`);
+
+    // Mapeia os nomes das salas
+    const nomesSalas: Record<number, string> = {
+      1: 'Sala 1 - Recepção',
+      2: 'Sala 2 - Consultório Médico',
+      3: 'Sala 3 - Exames',
+      4: 'Sala 4 - Coleta',
+      5: 'Sala 5 - Audiometria',
+      6: 'Sala 6 - Raio-X'
+    };
+    
+    // Define o nome da sala para o gamatela_chamadas
+    const nomeDaSala = nomesSalas[sala_id] || `Sala ${sala_id}`;
+
+    // Insere o registro na tabela gamatela_chamadas
+    const { error: errorGamatela } = await supabase
+      .from('gamatela_chamadas')
+      .insert({
+        ticket: identificador,
+        sala: nomeDaSala,
+        ticket_id: id_ticket,
+        nome: filaDestaSala.nome || null
+      });
+
+    if (errorGamatela) {
+      const msgErro = `Erro ao salvar o registro da chamada na TV: ${errorGamatela.message}`;
+      this.logger.error(msgErro);
+      throw new BadRequestException(msgErro);
+    }
 
     if (sala_id === 1) {
       this.telaChamadaGateway.emitirChamadaSemAgendamento(identificador, 'Recepção', filaDestaSala.nome);
