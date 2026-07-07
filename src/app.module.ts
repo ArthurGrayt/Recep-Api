@@ -21,6 +21,13 @@ import { UsuariosModule } from './modules/usuarios/usuarios.module';
 // Importa o módulo MenuModule para disponibilizar a rota de menu
 import { MenuModule } from './modules/menu/menu.module';
 
+// Importa o módulo AgendamentosModule para gerenciar os agendamentos
+import { AgendamentosModule } from './modules/agendamentos/agendamentos.module';
+
+// Importa o módulo ColaboradoresModule para gerenciar os colaboradores
+import { ColaboradoresModule } from './modules/colaboradores/colaboradores.module';
+import { SalasModule } from './modules/salas/salas.module';
+
 // Declara o módulo raiz da aplicação (AppModule)
 // Este é o ponto central onde todos os módulos são registrados
 @Module({
@@ -33,6 +40,11 @@ import { MenuModule } from './modules/menu/menu.module';
     UsuariosModule,
     // Registra o MenuModule na aplicação
     MenuModule,
+    // Registra o AgendamentosModule na aplicação
+    AgendamentosModule,
+    // Registra o ColaboradoresModule na aplicação
+    ColaboradoresModule,
+    SalasModule,
   ],
 
   // Registra os controllers padrão da aplicação
