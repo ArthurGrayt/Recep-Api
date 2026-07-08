@@ -17,6 +17,39 @@ export class AgendamentosService {
     private readonly salasService: SalasService,
   ) {}
 
+  // Helper para fazer upload de imagens base64 para o Supabase Storage
+  private async uploadFotoObs(supabase: any, base64Image: string, prefixId: string): Promise<string> {
+    const match = base64Image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (!match) {
+      throw new Error('Formato de imagem inválido. Esperado data:image/...;base64,...');
+    }
+
+    const contentType = match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+    const ext = contentType.split('/')[1] || 'png';
+    const filename = `${prefixId}_${Date.now()}.${ext}`;
+
+    const { data, error } = await supabase
+      .storage
+      .from('observacoes_agendamentos')
+      .upload(filename, buffer, {
+        contentType,
+        upsert: true
+      });
+
+    if (error) {
+      this.logger.error(`Erro ao fazer upload da imagem: ${error.message}`);
+      throw new Error(`Erro ao salvar a foto: ${error.message}`);
+    }
+
+    const { data: publicData } = supabase
+      .storage
+      .from('observacoes_agendamentos')
+      .getPublicUrl(filename);
+
+    return publicData.publicUrl;
+  }
+
   // Método assíncrono para buscar agendamentos com paginação e filtro de datas e sala
   async findAll(page: number, limit: number, dataInicial?: string, dataFinal?: string, sala?: number) {
     // Registra no log que a busca por agendamentos foi iniciada com os parâmetros informados
@@ -136,6 +169,557 @@ export class AgendamentosService {
     };
   }
 
+  // Método assíncrono para buscar os detalhes completos de todos os agendamentos de um colaborador em uma data específica
+  async findByColaboradorAndDate(
+    // Recebe o UUID do colaborador
+    colaborador_id: string,
+    // Recebe a data de atendimento
+    data_atendimento: string,
+    // Lista opcional de campos desejados no retorno (ex: ['id', 'status', 'colaboradores'])
+    fields?: string[],
+  ) {
+    this.logger.log(`Buscando detalhes do agendamento para o colaborador: ${colaborador_id} na data: ${data_atendimento}`);
+    
+    const supabase = this.supabaseService.getClient();
+    
+    // Busca todos os agendamentos do colaborador naquela data com dados completos do colaborador
+    const { data, error } = await supabase
+      .from('agendamentos')
+      .select(`
+        *,
+        colaboradores (
+          id,
+          nome,
+          cpf,
+          data_nascimento,
+          sexo,
+          colaborador_cargo_unidade_setor (
+            ativo,
+            cargo_setor_unidade (
+              cargo (
+                nome
+              ),
+              unidade_setor (
+                setor (
+                  nome
+                ),
+                unidade_cliente (
+                  id,
+                  razao_social,
+                  empresa_cliente (
+                    id,
+                    razao_social
+                  )
+                )
+              )
+            )
+          )
+        ),
+        exames_feitos (
+          id,
+          proced_id,
+          procedimentos (
+            nome
+          )
+        )
+      `)
+      .eq('colaborador_id', colaborador_id)
+      .eq('data_atendimento', data_atendimento);
+      
+    if (error) {
+      this.logger.error(`Erro ao buscar detalhes do agendamento: ${error.message}`);
+      throw new Error(`Erro ao buscar detalhes do agendamento: ${error.message}`);
+    }
+    
+    if (!data || data.length === 0) {
+      return null;
+    }
+    
+    // A regra de negócio principal foca na sala 1, pois ela guarda os dados financeiros e observações principais.
+    // Usamos a sala 1 como base ou a primeira que retornar caso não haja sala 1.
+    const baseAgendamento = data.find(a => a.sala === 1) || data[0];
+    
+    // Agrupa todos os exames feitos em todas as salas neste dia
+    const todosExames = data.flatMap(a => a.exames_feitos || []);
+    
+    // Extrai e planifica os dados do colaborador navegando pelos relacionamentos de forma segura,
+    // eliminando a necessidade de uma segunda chamada ao GET /colaboradores/:id
+    const colabRaw: any = baseAgendamento.colaboradores || {};
+    const historicoCargos = colabRaw.colaborador_cargo_unidade_setor || [];
+    // Busca a alocação ativa ou pega a primeira como fallback
+    const alocacaoAtual: any = historicoCargos.find((c: any) => c.ativo) || historicoCargos[0] || {};
+
+    // Extrai empresa, unidade, função e setor a partir da hierarquia de relacionamentos
+    const funcaoNome = alocacaoAtual.cargo_setor_unidade?.cargo?.nome || null;
+    const setorNome = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.setor?.nome || null;
+    const unidadeNome = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.razao_social || null;
+    const unidadeId = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.id || null;
+    const empresaNome = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.empresa_cliente?.razao_social || null;
+    const empresaId = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.empresa_cliente?.id || null;
+
+    // Monta o objeto do colaborador já planificado (mesmo formato do GET /colaboradores/:id)
+    const colaboradorPlanificado = {
+      id: colabRaw.id || null,
+      nome: colabRaw.nome || null,
+      cpf: colabRaw.cpf || null,
+      data_nascimento: colabRaw.data_nascimento || null,
+      sexo: colabRaw.sexo || null,
+      funcao: funcaoNome,
+      setor: setorNome,
+      unidade: unidadeNome,
+      unidade_id: unidadeId,
+      empresa: empresaNome,
+      empresa_id: empresaId,
+    };
+
+    // Monta o objeto de resposta completo antes de aplicar o filtro
+    const respostaCompleta: Record<string, any> = {
+      ...baseAgendamento,
+      colaboradores: colaboradorPlanificado,
+      exames_feitos: todosExames,
+    };
+
+    // Se nenhum campo foi solicitado, retorna o objeto inteiro sem filtro
+    if (!fields || fields.length === 0) {
+      return respostaCompleta;
+    }
+
+    // Aplica o filtro: monta um novo objeto apenas com os campos solicitados
+    const respostaFiltrada: Record<string, any> = {};
+    for (const campo of fields) {
+      // Só inclui o campo se ele existir no objeto de resposta completo
+      if (campo in respostaCompleta) {
+        respostaFiltrada[campo] = respostaCompleta[campo];
+      }
+    }
+
+    // Retorna o objeto filtrado com apenas os campos desejados pelo cliente
+    return respostaFiltrada;
+  }
+
+
+  // Método assíncrono para atualizar dados parciais ou exames de um agendamento agrupado por colaborador e data
+  async updateByColaboradorAndDate(
+    // Recebe o UUID do colaborador como identificador
+    colaborador_id: string,
+    // Recebe a data de atendimento atual do agendamento
+    data_atendimento: string,
+    // Recebe o payload com os campos a serem alterados
+    payload: any
+  ) {
+    // Registra no log o início do processo de atualização com os parâmetros recebidos
+    this.logger.log(`Atualizando agendamento para o colaborador: ${colaborador_id} na data: ${data_atendimento}`);
+    // Obtém o cliente do Supabase
+    const supabase = this.supabaseService.getClient();
+
+    // Desestrutura o payload para separar a lista de exames dos demais campos
+    const {
+      // Extrai o array de exames (IDs dos procedimentos)
+      exames,
+      // Agrupa todos os outros campos a serem atualizados
+      ...camposUpdate
+    } = payload;
+
+    // Se nenhum campo de atualização e nem a lista de exames foram enviados
+    if (Object.keys(camposUpdate).length === 0 && !exames) {
+      // Retorna uma mensagem informativa indicando que nada foi alterado
+      return { message: 'Nenhuma alteração enviada' };
+    }
+
+    // Busca os registros atuais do agendamento para validar existência e usar como fallback
+    const { data: agendamentosAtuais, error: errGetAtuais } = await supabase
+      // Acessa a tabela de agendamentos
+      .from('agendamentos')
+      // Seleciona todas as colunas
+      .select('*')
+      // Filtra pelo UUID do colaborador
+      .eq('colaborador_id', colaborador_id)
+      // Filtra pela data de atendimento atual
+      .eq('data_atendimento', data_atendimento);
+
+    // Se houve erro ao buscar os registros atuais
+    if (errGetAtuais) {
+      // Registra o erro no log
+      this.logger.error(`Erro ao buscar dados atuais do agendamento: ${errGetAtuais.message}`);
+      // Lança uma exceção detalhando a falha
+      throw new Error(`Erro ao buscar dados atuais do agendamento: ${errGetAtuais.message}`);
+    }
+
+    // Se a consulta não retornou nenhum agendamento
+    if (!agendamentosAtuais || agendamentosAtuais.length === 0) {
+      // Lança uma exceção indicando que o agendamento não existe
+      throw new Error('Nenhum agendamento encontrado para os parâmetros informados.');
+    }
+
+    // Identifica o agendamento da sala 1 como base ou pega o primeiro disponível
+    const baseAgendamento = agendamentosAtuais.find(a => a.sala === 1) || agendamentosAtuais[0];
+
+    // Cria um objeto vazio para guardar as propriedades globais que afetam todas as salas
+    const camposGerais: any = {};
+    // Se a data de atendimento foi enviada, adiciona às propriedades gerais
+    if (camposUpdate.data_atendimento !== undefined) camposGerais.data_atendimento = camposUpdate.data_atendimento;
+    // Se o tipo do agendamento foi enviado, adiciona às propriedades gerais
+    if (camposUpdate.tipo !== undefined) camposGerais.tipo = camposUpdate.tipo;
+    // Se a unidade foi enviada, adiciona às propriedades gerais
+    if (camposUpdate.unidade !== undefined) camposGerais.unidade = camposUpdate.unidade;
+    // Se o status foi enviado, adiciona às propriedades gerais
+    if (camposUpdate.status !== undefined) camposGerais.status = camposUpdate.status;
+    // Se compareceu foi enviado, adiciona às propriedades gerais
+    if (camposUpdate.compareceu !== undefined) camposGerais.compareceu = camposUpdate.compareceu;
+    // Se a prioridade foi enviada, adiciona às propriedades gerais
+    if (camposUpdate.prioridade !== undefined) camposGerais.prioridade = camposUpdate.prioridade;
+
+    // Cria um objeto vazio para os campos que pertencem estritamente à sala 1 (recepção/financeiro)
+    const camposSala1: any = {};
+    // Se a quantidade de ASO a cobrar foi enviada, adiciona às propriedades da sala 1
+    if (camposUpdate.aso_qtd_cobrar !== undefined) camposSala1.aso_qtd_cobrar = camposUpdate.aso_qtd_cobrar;
+    // Se a quantidade de RAC a cobrar foi enviada, adiciona às propriedades da sala 1
+    if (camposUpdate.rac_qtd_cobrar !== undefined) camposSala1.rac_qtd_cobrar = camposUpdate.rac_qtd_cobrar;
+    // Se observação de agendamento foi enviada, adiciona às propriedades da sala 1
+    if (camposUpdate.obs_agendamento !== undefined) camposSala1.obs_agendamento = camposUpdate.obs_agendamento;
+    // Se observação clínica foi enviada, adiciona às propriedades da sala 1
+    if (camposUpdate.observacoes !== undefined) camposSala1.observacoes = camposUpdate.observacoes;
+    // Se observação laboratorial foi enviada, adiciona às propriedades da sala 1
+    if (camposUpdate.observacoes_laboratorial !== undefined) camposSala1.observacoes_laboratorial = camposUpdate.observacoes_laboratorial;
+    
+    // Processamento da imagem foto_obs
+    if (camposUpdate.foto_obs !== undefined) {
+      if (camposUpdate.foto_obs && camposUpdate.foto_obs.startsWith('data:image')) {
+        const urlSegura = `${colaborador_id}_${data_atendimento}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        camposSala1.foto_obs = await this.uploadFotoObs(supabase, camposUpdate.foto_obs, urlSegura);
+      } else {
+        // Se for string vazia, null, ou uma URL existente
+        camposSala1.foto_obs = camposUpdate.foto_obs;
+      }
+    }
+
+    // Se houver algum campo global para atualizar
+    if (Object.keys(camposGerais).length > 0) {
+      // Atualiza todas as linhas de agendamentos desse colaborador na data especificada
+      const { error: errGerais } = await supabase
+        // Define a tabela agendamentos
+        .from('agendamentos')
+        // Envia as propriedades gerais alteradas
+        .update(camposGerais)
+        // Filtra pelo colaborador
+        .eq('colaborador_id', colaborador_id)
+        // Filtra pela data original
+        .eq('data_atendimento', data_atendimento);
+
+      // Se ocorrer erro na atualização geral
+      if (errGerais) {
+        // Lança uma exceção informando o erro do banco
+        throw new Error(`Erro ao atualizar campos gerais: ${errGerais.message}`);
+      }
+    }
+
+    // Se houver algum campo específico da Sala 1 para atualizar
+    if (Object.keys(camposSala1).length > 0) {
+      // Atualiza apenas a linha da sala 1
+      const { error: errSala1 } = await supabase
+        // Define a tabela agendamentos
+        .from('agendamentos')
+        // Envia os dados financeiros e observações
+        .update(camposSala1)
+        // Filtra pelo colaborador
+        .eq('colaborador_id', colaborador_id)
+        // Filtra pela nova data (se foi alterada) ou pela data antiga
+        .eq('data_atendimento', camposGerais.data_atendimento || data_atendimento)
+        // Filtra especificamente pela sala 1
+        .eq('sala', 1);
+
+      // Se ocorrer erro na atualização da sala 1
+      if (errSala1) {
+        // Lança uma exceção detalhando a falha
+        throw new Error(`Erro ao atualizar campos da Sala 1: ${errSala1.message}`);
+      }
+    }
+
+    // Se um array de exames foi fornecido para atualizar a lista de procedimentos
+    if (exames && Array.isArray(exames)) {
+      // Busca novamente os agendamentos já atualizados para refletir qualquer mudança de data
+      const { data: agendamentosExistentes, error: errExistentes } = await supabase
+        // Define a tabela agendamentos
+        .from('agendamentos')
+        // Seleciona o ID e a Sala dos registros ativos
+        .select('id, sala')
+        // Filtra pelo colaborador
+        .eq('colaborador_id', colaborador_id)
+        // Usa a data atualizada (ou a original se não mudou)
+        .eq('data_atendimento', camposGerais.data_atendimento || data_atendimento);
+
+      // Se houver erro ao ler os agendamentos ativos
+      if (errExistentes) {
+        // Lança uma exceção
+        throw new Error(`Erro ao buscar agendamentos existentes para atualizar exames: ${errExistentes.message}`);
+      }
+
+      // Busca os detalhes e categorias dos novos exames enviados
+      const { data: procedimentos, error: errProc } = await supabase
+        // Define a tabela procedimentos
+        .from('procedimentos')
+        // Seleciona ID e categoria
+        .select('id, idcategoria')
+        // Filtra apenas os IDs presentes no payload
+        .in('id', exames);
+
+      // Se houver erro ao buscar os procedimentos
+      if (errProc) {
+        // Lança uma exceção
+        throw new Error(`Erro ao buscar procedimentos para atualização: ${errProc.message}`);
+      }
+
+      // Obtém o mapa de categorias por sala
+      const mapeamento = this.salasService.getMapeamentoCategorias();
+      // Inicializa o objeto para agrupar exames por sala
+      const procedimentosPorSala: Record<number, number[]> = {};
+
+      // Itera por cada procedimento encontrado
+      procedimentos?.forEach(proc => {
+        // Obtém a sala correspondente baseado no mapa de categorias
+        const sala = mapeamento[proc.idcategoria as keyof typeof mapeamento];
+        // Se a categoria mapear para uma sala válida
+        if (sala) {
+          // Se o array daquela sala ainda não existe, cria ele
+          if (!procedimentosPorSala[sala]) procedimentosPorSala[sala] = [];
+          // Adiciona o ID do procedimento ao grupo daquela sala
+          procedimentosPorSala[sala].push(proc.id);
+        }
+      });
+
+      // Garante que a Sala 1 sempre exista na lista para evitar exclusão acidental da sala de recepção
+      if (!procedimentosPorSala[1]) {
+        // Inicializa o array vazio para a sala 1
+        procedimentosPorSala[1] = [];
+      }
+
+      // Cria um mapa local mapeando o ID da sala para o ID do agendamento (linha do banco)
+      const agendamentosPorSalaExistentes = new Map<number, number>();
+      // Preenche o mapa com os dados buscados do banco
+      agendamentosExistentes?.forEach(a => {
+        // Vincula a sala com seu respectivo ID de agendamento
+        agendamentosPorSalaExistentes.set(a.sala, a.id);
+      });
+
+      // Filtra as salas requeridas nos novos exames que ainda não possuem linha no banco
+      const novasSalasParaCriar = Object.keys(procedimentosPorSala)
+        // Converte as chaves de string para number
+        .map(Number)
+        // Filtra apenas as que não existem no nosso mapa
+        .filter(sala => !agendamentosPorSalaExistentes.has(sala));
+
+      // Se houver novas salas a serem criadas
+      if (novasSalasParaCriar.length > 0) {
+        // Prepara os dados de insert para cada nova sala
+        const insertsNovasSalas = novasSalasParaCriar.map(salaNum => ({
+          // Define o colaborador
+          colaborador_id,
+          // Define a sala correspondente
+          sala: salaNum,
+          // Status inicial pendente
+          status: 'pendente',
+          // Repassa o compareceu caso o usuário esteja marcando presença no mesmo momento
+          compareceu: camposGerais.compareceu ?? baseAgendamento.compareceu ?? false,
+          // Define a data de atendimento
+          data_atendimento: camposGerais.data_atendimento || data_atendimento,
+          // Mantém o tipo herdado do agendamento original
+          tipo: camposGerais.tipo || baseAgendamento.tipo,
+          // Mantém a unidade herdada do agendamento original
+          unidade: camposGerais.unidade ?? baseAgendamento.unidade,
+        }));
+
+        // Insere os novos agendamentos das novas salas
+        const { data: novasSalasCriadas, error: errNovasSalas } = await supabase
+          // Define a tabela
+          .from('agendamentos')
+          // Envia a lista para inserção
+          .insert(insertsNovasSalas)
+          // Solicita o retorno do ID e Sala gerados
+          .select('id, sala');
+
+        // Se ocorrer erro na inserção das salas
+        if (errNovasSalas) {
+          // Lança exceção explicativa
+          throw new Error(`Erro ao criar novos agendamentos de sala: ${errNovasSalas.message}`);
+        }
+
+        // Adiciona as salas recém-criadas ao nosso mapa de relacionamento
+        novasSalasCriadas?.forEach(ns => {
+          // Salva o novo ID no mapa
+          agendamentosPorSalaExistentes.set(ns.sala, ns.id);
+        });
+      }
+
+      // Identifica salas antigas que não possuem mais nenhum exame associado (e não são a sala 1)
+      const salasParaRemover = Array.from(agendamentosPorSalaExistentes.keys())
+        // Filtra salas que não sejam a 1 e que não estejam no novo agrupamento
+        .filter(sala => sala !== 1 && !procedimentosPorSala[sala]);
+
+      // Cria uma lista contendo todos os IDs de agendamento do grupo
+      const todosIdsAgendamentos = Array.from(agendamentosPorSalaExistentes.values());
+      // Deleta todos os exames vinculados anteriormente a esses agendamentos em exames_feitos
+      const { error: errDelExames } = await supabase
+        // Define a tabela exames_feitos
+        .from('exames_feitos')
+        // Deleta
+        .delete()
+        // Filtra pelos IDs dos agendamentos
+        .in('agendamento_id', todosIdsAgendamentos);
+
+      // Se ocorrer erro ao limpar exames antigos
+      if (errDelExames) {
+        // Lança exceção
+        throw new Error(`Erro ao limpar exames antigos: ${errDelExames.message}`);
+      }
+
+      // Se houver salas que ficaram vazias e precisam ser removidas
+      if (salasParaRemover.length > 0) {
+        // Mapeia as salas vazias para seus respectivos IDs no banco de dados
+        const idsParaRemover = salasParaRemover.map(sala => agendamentosPorSalaExistentes.get(sala)!);
+        // Deleta as linhas das salas obsoletas na tabela agendamentos
+        const { error: errDelAgend } = await supabase
+          // Define a tabela agendamentos
+          .from('agendamentos')
+          // Deleta
+          .delete()
+          // Filtra pelos IDs identificados
+          .in('id', idsParaRemover);
+
+        // Se houver erro ao excluir os agendamentos antigos
+        if (errDelAgend) {
+          // Lança exceção
+          throw new Error(`Erro ao remover salas não utilizadas: ${errDelAgend.message}`);
+        }
+
+        // Itera removendo as salas apagadas também do nosso mapa em memória
+        salasParaRemover.forEach(sala => {
+          // Deleta a entrada do mapa
+          agendamentosPorSalaExistentes.delete(sala);
+        });
+      }
+
+      // Prepara os novos inserts na tabela exames_feitos
+      const insertsExamesFeitos: any[] = [];
+      // Itera por cada sala e sua respectiva lista de IDs de exames
+      Object.entries(procedimentosPorSala).forEach(([salaStr, procs]) => {
+        // Converte a sala para number
+        const salaNum = Number(salaStr);
+        // Obtém o ID do agendamento relacionado a essa sala
+        const agendamentoId = agendamentosPorSalaExistentes.get(salaNum);
+        
+        // Se a sala possui um agendamento válido cadastrado
+        if (agendamentoId) {
+          // Itera sobre cada procedimento da sala
+          procs.forEach(proc_id => {
+            // Adiciona o insert na lista
+            insertsExamesFeitos.push({
+              // Define o UUID do colaborador
+              colaborador_uuid: colaborador_id,
+              // Vincula ao ID do agendamento específico daquela sala
+              agendamento_id: agendamentoId,
+              // Define o ID do procedimento do exame
+              proced_id: proc_id
+            });
+          });
+        }
+      });
+
+      // Se houver novos vínculos de exames para inserir
+      if (insertsExamesFeitos.length > 0) {
+        // Insere os dados na tabela exames_feitos
+        const { error: errExamesIns } = await supabase
+          // Define a tabela
+          .from('exames_feitos')
+          // Insere a lista formatada
+          .insert(insertsExamesFeitos);
+
+        // Se falhar a inserção dos exames
+        if (errExamesIns) {
+          // Lança uma exceção
+          throw new Error(`Erro ao inserir novos exames: ${errExamesIns.message}`);
+        }
+      }
+    }
+
+    // Retorna mensagem de sucesso na operação
+    return { message: 'Agendamento atualizado com sucesso' };
+  }
+
+  // Método assíncrono para deletar definitivamente um agendamento inteiro (todas as salas) agrupado por colaborador e data
+  async deleteByColaboradorAndDate(
+    // Recebe o UUID do colaborador
+    colaborador_id: string,
+    // Recebe a data do atendimento
+    data_atendimento: string
+  ) {
+    // Registra o início do processo de exclusão no log
+    this.logger.log(`Deletando agendamento para o colaborador: ${colaborador_id} na data: ${data_atendimento}`);
+    // Obtém o cliente do Supabase
+    const supabase = this.supabaseService.getClient();
+
+    // 1. Busca os IDs de todos os agendamentos desse grupo para poder limpar os exames
+    const { data: agendamentos, error: errGet } = await supabase
+      // Acessa a tabela agendamentos
+      .from('agendamentos')
+      // Seleciona os IDs
+      .select('id')
+      // Filtra pelo colaborador
+      .eq('colaborador_id', colaborador_id)
+      // Filtra pela data
+      .eq('data_atendimento', data_atendimento);
+
+    // Se ocorrer erro na busca
+    if (errGet) {
+      // Registra o erro e lança exceção
+      this.logger.error(`Erro ao buscar agendamentos para exclusão: ${errGet.message}`);
+      throw new Error(`Erro ao buscar agendamentos para exclusão: ${errGet.message}`);
+    }
+
+    // Se não houver nenhum agendamento, apenas retorna sucesso (já está deletado ou não existe)
+    if (!agendamentos || agendamentos.length === 0) {
+      return { message: 'Nenhum agendamento encontrado para excluir' };
+    }
+
+    // Extrai o array de IDs encontrados
+    const ids = agendamentos.map(a => a.id);
+
+    // 2. Remove todos os vínculos de exames feitos para evitar violação de chave estrangeira (se não houver cascade)
+    const { error: errDelExames } = await supabase
+      // Tabela exames_feitos
+      .from('exames_feitos')
+      // Ação de exclusão
+      .delete()
+      // Filtra pelos IDs dos agendamentos localizados
+      .in('agendamento_id', ids);
+
+    // Se falhar na remoção dos exames
+    if (errDelExames) {
+      // Registra o erro e lança exceção
+      this.logger.error(`Erro ao excluir exames vinculados: ${errDelExames.message}`);
+      throw new Error(`Erro ao excluir exames vinculados: ${errDelExames.message}`);
+    }
+
+    // 3. Remove definitivamente as linhas de agendamentos
+    const { error: errDelAgendamentos } = await supabase
+      // Tabela agendamentos
+      .from('agendamentos')
+      // Ação de exclusão
+      .delete()
+      // Filtra pelos IDs localizados
+      .in('id', ids);
+
+    // Se ocorrer erro ao excluir os agendamentos principais
+    if (errDelAgendamentos) {
+      // Lança exceção detalhando a falha
+      this.logger.error(`Erro ao excluir agendamentos: ${errDelAgendamentos.message}`);
+      throw new Error(`Erro ao excluir agendamentos: ${errDelAgendamentos.message}`);
+    }
+
+    // Retorna a confirmação de sucesso da deleção
+    return { message: 'Agendamento e exames excluídos com sucesso' };
+  }
+
+
   // Interface para o novo payload rico do front-end
   async create(payload: { 
     colaborador_id?: string; 
@@ -146,13 +730,16 @@ export class AgendamentosService {
     sexo?: string;
     funcao?: string;
     setor?: string;
+    tipo?: string;
     unidade?: number;
     aso_qtd_cobrar?: number;
     rac_qtd_cobrar?: number;
+    data_atendimento?: string;
     exames: number[];
     obs_agendamento?: string;
     observacoes?: string;
     observacoes_laboratorial?: string;
+    foto_obs?: string;
   }) {
     this.logger.log(`Criando agendamento para o colaborador ${payload.colaborador_id || 'Avulso'}`);
     
@@ -186,31 +773,45 @@ export class AgendamentosService {
         procedimentosPorSala[sala].push(proc.id);
       }
     });
+
+    // Garante que a Sala 1 sempre exista, independente de ter exames mapeados para ela ou não
+    if (!procedimentosPorSala[1]) {
+      procedimentosPorSala[1] = [];
+    }
     
-    // Define a data do atendimento como hoje (já que não vem mais do payload)
-    const dataAtendimento = new Date().toISOString().split('T')[0];
+    // Define a data do atendimento com base no que foi enviado ou como hoje
+    const dataAtendimento = payload.data_atendimento || new Date().toISOString().split('T')[0];
     
+    // 3.5 Processar upload de foto, caso exista um base64
+    let fotoUrl: string | null = null;
+    if (payload.foto_obs && payload.foto_obs.startsWith('data:image')) {
+      const colabOrAvulso = payload.colaborador_id || 'avulso';
+      const urlSegura = `${colabOrAvulso}_${dataAtendimento}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      fotoUrl = await this.uploadFotoObs(supabase, payload.foto_obs, urlSegura);
+    } else {
+      fotoUrl = payload.foto_obs || null;
+    }
+
     // Monta o array de inserts para criar uma linha na tabela agendamentos para CADA sala necessária
     // Mapeando os campos do payload para as respectivas colunas no banco de dados
-    const insertsAgendamentos = Object.keys(procedimentosPorSala).map(salaStr => ({
-      colaborador_id: payload.colaborador_id || null,
-      sala: Number(salaStr),
-      status: 'pendente',
-      data_atendimento: dataAtendimento,
-      unidade: payload.unidade ?? null,
-      aso_qtd_cobrar: payload.aso_qtd_cobrar ?? null,
-      rac_qtd_cobrar: payload.rac_qtd_cobrar ?? null,
-      obs_agendamento: payload.obs_agendamento || null,
-      observacoes: payload.observacoes || null,
-      observacoes_laboratorial: payload.observacoes_laboratorial || null,
-      // Se fosse salvar campos novos para avulso futuramente, eles entrariam aqui
-    }));
-    
-    // Se nenhum procedimento válido com sala foi enviado, não fazemos nada
-    if (insertsAgendamentos.length === 0) {
-      this.logger.warn('Nenhum procedimento válido com sala mapeada. Nenhum agendamento criado.');
-      return { message: 'Nenhum agendamento criado pois os procedimentos não possuem sala mapeada.' };
-    }
+    const insertsAgendamentos = Object.keys(procedimentosPorSala).map(salaStr => {
+      const salaNum = Number(salaStr);
+      return {
+        colaborador_id: payload.colaborador_id || null,
+        sala: salaNum,
+        status: 'pendente',
+        data_atendimento: dataAtendimento,
+        tipo: payload.tipo || null,
+        unidade: payload.unidade ?? null,
+        // Campos de faturamento e observações vão EXCLUSIVAMENTE para a sala 1
+        aso_qtd_cobrar: salaNum === 1 ? (payload.aso_qtd_cobrar ?? null) : null,
+        rac_qtd_cobrar: salaNum === 1 ? (payload.rac_qtd_cobrar ?? null) : null,
+        obs_agendamento: salaNum === 1 ? (payload.obs_agendamento || null) : null,
+        observacoes: salaNum === 1 ? (payload.observacoes || null) : null,
+        observacoes_laboratorial: salaNum === 1 ? (payload.observacoes_laboratorial || null) : null,
+        foto_obs: salaNum === 1 ? fotoUrl : null,
+      };
+    });
     
     // 4. Salvar os Agendamentos
     // Usamos .select() para o Supabase retornar os registros inseridos (com os IDs gerados)

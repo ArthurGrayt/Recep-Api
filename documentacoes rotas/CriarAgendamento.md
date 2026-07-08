@@ -20,7 +20,9 @@ Este documento detalha o endpoint responsável por criar novos agendamentos e re
   "sexo": "M", 
   "funcao": "Operador de Empilhadeira", 
   "setor": "Logística", 
+  "tipo": "Admissional",
   "unidade": 42, 
+  "data_atendimento": "2026-07-07",
   "exames": [1, 2, 15], 
   "aso_qtd_cobrar": 1, 
   "rac_qtd_cobrar": 0, 
@@ -38,10 +40,11 @@ Este documento detalha o endpoint responsável por criar novos agendamentos e re
 
 **⚙️ O que faz no banco de dados e API:**
 1. Acessa a tabela `procedimentos` para buscar o `idcategoria` de cada exame enviado no array `exames`.
-2. Utiliza o `SalasService` para mapear cada `idcategoria` encontrada para uma `Sala` (ex: Categoria Laboratorial -> Sala 4, Categoria Raio-X -> Sala 6).
-3. Agrupa os procedimentos pela sala identificada. Procedimentos que não possuem categoria vinculada a nenhuma sala (como Documentos e Laudos puros) são **ignorados** e não geram agendamentos nem registros.
-4. Faz um `INSERT` na tabela `agendamentos` criando **um agendamento para cada sala única**. (ex: Se os exames acionaram as salas 4 e 6, duas linhas são criadas na tabela `agendamentos` para esse colaborador, ambas com `status` "pendente").
-5. Faz um `INSERT` em lote na tabela `exames_feitos`, gravando linha a linha cada `proced_id` vinculado especificamente ao `agendamento_id` da sua respectiva sala.
+2. Utiliza o `SalasService` para mapear cada `idcategoria` encontrada para uma `Sala` (ex: Categoria Laboratorial -> Sala 4).
+3. Agrupa os procedimentos pelas salas identificadas.
+4. **Regra de Negócio (Sala 1):** O sistema *sempre* força a criação de um agendamento para a `Sala 1`, mesmo que nenhum exame esteja mapeado fisicamente para ela. 
+5. Faz um `INSERT` na tabela `agendamentos` criando **um agendamento para cada sala única**. Importante: os campos de faturamento (`aso_qtd_cobrar`, `rac_qtd_cobrar`) e observações (`obs_agendamento`, `observacoes`, `observacoes_laboratorial`) são gravados **exclusivamente** na linha da `Sala 1`. Nas demais salas, esses valores ficam em branco.
+6. Faz um `INSERT` em lote na tabela `exames_feitos`, vinculando cada exame à sua respectiva sala (exames sem sala são ignorados, exames da Sala 1 vão pro ID da Sala 1, etc).
 
 **✅ Retorno Esperado (201 Created)**
 ```json

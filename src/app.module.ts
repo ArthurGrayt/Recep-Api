@@ -27,6 +27,15 @@ import { AgendamentosModule } from './modules/agendamentos/agendamentos.module';
 // Importa o módulo ColaboradoresModule para gerenciar os colaboradores
 import { ColaboradoresModule } from './modules/colaboradores/colaboradores.module';
 import { SalasModule } from './modules/salas/salas.module';
+// Importa o módulo de cargos para disponibilizar o GET /cargos
+import { CargosModule } from './modules/cargos/cargos.module';
+// Importa o módulo de setores para disponibilizar o GET /setores
+import { SetoresModule } from './modules/setores/setores.module';
+// Importa o módulo de empresas para disponibilizar o GET /empresas
+import { EmpresasModule } from './modules/empresas/empresas.module';
+// Importa o módulo de unidades para disponibilizar o GET /unidades
+import { UnidadesModule } from './modules/unidades/unidades.module';
+
 
 // Declara o módulo raiz da aplicação (AppModule)
 // Este é o ponto central onde todos os módulos são registrados
@@ -45,6 +54,14 @@ import { SalasModule } from './modules/salas/salas.module';
     // Registra o ColaboradoresModule na aplicação
     ColaboradoresModule,
     SalasModule,
+    // Registra o módulo de busca de cargos/funções
+    CargosModule,
+    // Registra o módulo de busca de setores
+    SetoresModule,
+    // Registra o módulo de busca de empresas clientes
+    EmpresasModule,
+    // Registra o módulo de busca de unidades clientes
+    UnidadesModule,
   ],
 
   // Registra os controllers padrão da aplicação

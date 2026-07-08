@@ -74,8 +74,10 @@ export class ColaboradoresService {
                 nome
               ),
               unidade_cliente (
+                id,
                 razao_social,
                 empresa_cliente (
+                  id,
                   razao_social
                 )
               )
@@ -99,7 +101,9 @@ export class ColaboradoresService {
     
     // Extrai empresa, unidade, função e setor navegando pelos relacionamentos de forma segura
     const unidadeNome = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.razao_social || null;
+    const unidadeId = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.id || null;
     const empresaNome = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.empresa_cliente?.razao_social || null;
+    const empresaId = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.empresa_cliente?.id || null;
     const funcaoNome = alocacaoAtual.cargo_setor_unidade?.cargo?.nome || null;
     const setorNome = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.setor?.nome || null;
 
@@ -111,7 +115,9 @@ export class ColaboradoresService {
       data_nascimento: data.data_nascimento,
       sexo: data.sexo,
       empresa: empresaNome,
+      empresa_id: empresaId,
       unidade: unidadeNome,
+      unidade_id: unidadeId,
       funcao: funcaoNome,
       setor: setorNome
     };
