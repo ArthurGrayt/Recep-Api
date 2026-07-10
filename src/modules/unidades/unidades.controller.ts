@@ -32,16 +32,20 @@ export class UnidadesController {
   })
   // Define um endpoint GET na rota base /unidades
   @Get()
-  // Método assíncrono que recebe os query params opcionais da query string
+  // Método assíncrono que recebe os query params opcionais da query string e paginação
   async buscar(
     // Extrai o termo de busca da query string (ex: ?search=matriz)
-    @Query('search') search: string,
+    @Query('search') search?: string,
     // Extrai o filtro opcional por empresa (ex: ?empresa_id=2)
     @Query('empresa_id') empresa_id?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
   ) {
     // Converte empresa_id para número se foi fornecido, ou deixa undefined
     const empresaIdNumero = empresa_id ? Number(empresa_id) : undefined;
+    const pageNumber = page ? Number(page) : 1;
+    const limitNumber = limit ? Number(limit) : 10;
     // Repassa os parâmetros para o service e retorna o resultado
-    return this.unidadesService.buscar(search, empresaIdNumero);
+    return this.unidadesService.buscar(search, empresaIdNumero, pageNumber, limitNumber);
   }
 }

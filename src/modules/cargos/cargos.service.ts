@@ -12,29 +12,31 @@ export class CargosService {
   // Injeta o SupabaseService via construtor
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  // Método assíncrono para buscar cargos com suporte a pesquisa por nome
-  async buscar(search: string) {
-    // Registra no log o termo de busca recebido
-    this.logger.log(`Buscando cargos com o termo: ${search}`);
+  // Método assíncrono para buscar cargos com suporte a pesquisa por nome e paginação
+  async buscar(search?: string, page: number = 1, limit: number = 10) {
+    // Registra no log o termo de busca e paginação recebidos
+    this.logger.log(`Buscando cargos com o termo: ${search}, page: ${page}, limit: ${limit}`);
 
     // Obtém o cliente do Supabase
     const supabase = this.supabaseService.getClient();
 
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     // Inicia a query na tabela 'cargo' selecionando apenas id e nome
     let query = supabase
       .from('cargo')
-      .select('id, nome')
-      // Limita a 15 resultados para não sobrecarregar o payload
-      .limit(15);
+      .select('id, nome', { count: 'exact' })
+      .order('nome', { ascending: true })
+      .range(from, to);
 
-    // Se um termo de busca válido foi fornecido, aplica o filtro ILIKE (case-insensitive)
+    // Se um termo de busca válido foi fornecido, aplica o filtro ILIKE
     if (search && search.trim() !== '') {
-      // Busca registros cujo nome contenha o termo em qualquer posição
       query = query.ilike('nome', `%${search.trim()}%`);
     }
 
     // Executa a query e desestrutura o resultado
-    const { data, error } = await query;
+    const { data, error, count } = await query;
 
     // Se ocorrer algum erro na consulta
     if (error) {
@@ -44,7 +46,15 @@ export class CargosService {
       throw new Error(`Erro ao buscar cargos: ${error.message}`);
     }
 
-    // Retorna a lista de cargos encontrados
-    return data;
+    // Retorna a lista de cargos encontrados e metadados de paginação
+    return {
+      data,
+      meta: {
+        total: count || 0,
+        page,
+        limit,
+        totalPages: Math.ceil((count || 0) / limit),
+      }
+    };
   }
 }

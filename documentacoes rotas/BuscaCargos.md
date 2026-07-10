@@ -15,11 +15,13 @@
 | Parâmetro | Tipo | Descrição |
 |---|---|---|
 | `search` | `string` | Termo de busca (ilike) aplicado sobre o nome do cargo. |
+| `page` | `number` | Número da página para paginação (padrão: 1). |
+| `limit` | `number` | Quantidade de registros por página (padrão: 10). |
 
 ### Exemplos de uso:
 
 ```
-# Listar os 15 primeiros cargos cadastrados (sem filtro)
+# Listar os cargos da primeira página (limite de 10)
 GET /cargos
 
 # Buscar cargos que contenham "Ajudante"
@@ -31,16 +33,24 @@ GET /cargos?search=Ajudante
 ## ✅ Retorno Esperado (200 OK)
 
 ```json
-[
-  {
-    "id": 1,
-    "nome": "Ajudante de Pedreiro"
-  },
-  {
-    "id": 2,
-    "nome": "Pedreiro"
+{
+  "data": [
+    {
+      "id": 1,
+      "nome": "Ajudante de Pedreiro"
+    },
+    {
+      "id": 2,
+      "nome": "Pedreiro"
+    }
+  ],
+  "meta": {
+    "total": 30,
+    "page": 1,
+    "limit": 10,
+    "totalPages": 3
   }
-]
+}
 ```
 
 ---
@@ -49,4 +59,4 @@ GET /cargos?search=Ajudante
 
 1. **Consulta:** Faz um SELECT na tabela `cargo` (`id, nome`).
 2. **Filtro:** Se `search` for passado, adiciona uma cláusula `ILIKE` no campo `nome`.
-3. **Limite:** A resposta é limitada a 15 registros para otimizar a resposta.
+3. **Limite:** A resposta é paginada. Retorna 10 registros por página por padrão, que podem ser controlados enviando os parâmetros `page` e `limit`.

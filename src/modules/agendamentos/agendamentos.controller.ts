@@ -29,14 +29,46 @@ export class AgendamentosController {
     @Query('data_final') dataFinal?: string,
     // Extrai o parâmetro "sala" da query string (ex: ?sala=2)
     @Query('sala') sala?: string,
+    // Filtros adicionais
+    @Query('empresa_id') empresa_id?: string,
+    @Query('unidade_id') unidade_id?: string,
+    @Query('cargo_id') cargo_id?: string,
+    @Query('metodo_pagamento') metodo_pagamento?: string,
+    @Query('aso_liberado') aso_liberado?: string,
+    @Query('tipo_exame') tipo_exame?: string,
+    @Query('rac_qtd_cobrar') rac_qtd_cobrar?: string,
+    @Query('aso_qtd_cobrar') aso_qtd_cobrar?: string,
   ) {
     // Define valores padrão para a paginação caso não sejam fornecidos
     const pageNumber = page ? Number(page) : 1;
     const limitNumber = limit ? Number(limit) : 10;
     const salaNumber = sala ? Number(sala) : undefined;
 
-    // Chama o método findAll do serviço repassando a paginação e os filtros de data e sala
-    return this.agendamentosService.findAll(pageNumber, limitNumber, dataInicial, dataFinal, salaNumber);
+    const filters = {
+      empresa_id,
+      unidade_id,
+      cargo_id,
+      metodo_pagamento,
+      aso_liberado,
+      tipo_exame,
+      rac_qtd_cobrar,
+      aso_qtd_cobrar
+    };
+
+    // Chama o método findAll do serviço repassando a paginação e os filtros de data, sala e adicionais
+    return this.agendamentosService.findAll(pageNumber, limitNumber, dataInicial, dataFinal, salaNumber, filters);
+  }
+
+  @ApiOperation({
+    summary: 'Estatísticas de presença',
+    description: 'Retorna a quantidade total de agendamentos (sala 1) separados por presença confirmada ou ausente.'
+  })
+  @Get('estatisticas/presenca')
+  async getPresencaStats(
+    @Query('data_inicial') dataInicial?: string,
+    @Query('data_final') dataFinal?: string,
+  ) {
+    return this.agendamentosService.getPresencaStats(dataInicial, dataFinal);
   }
 
   @ApiOperation({
@@ -74,6 +106,32 @@ export class AgendamentosController {
   ) {
     // Chama o método correspondente do serviço para realizar as atualizações necessárias
     return this.agendamentosService.updateByColaboradorAndDate(colaboradorId, dataAtendimento, payload);
+  }
+
+  @ApiOperation({
+    summary: 'Atualizar ASO do agendamento',
+    description: 'Faz upload de um arquivo base64 para o bucket ASOS e salva a URL na sala 1, ou remove a URL existente.'
+  })
+  @Patch('colaborador/:colaborador_id/data/:data_atendimento/aso')
+  async updateAso(
+    @Param('colaborador_id') colaboradorId: string,
+    @Param('data_atendimento') dataAtendimento: string,
+    @Body() payload: { aso_file?: string; remove?: boolean }
+  ) {
+    return this.agendamentosService.updateAso(colaboradorId, dataAtendimento, payload);
+  }
+
+  @ApiOperation({
+    summary: 'Liberar ASO',
+    description: 'Atualiza a data de liberação do ASO (aso_liberado) na sala 1.'
+  })
+  @Patch('colaborador/:colaborador_id/data/:data_atendimento/liberar-aso')
+  async liberarAso(
+    @Param('colaborador_id') colaboradorId: string,
+    @Param('data_atendimento') dataAtendimento: string,
+    @Body() payload: { aso_liberado: string | null }
+  ) {
+    return this.agendamentosService.liberarAso(colaboradorId, dataAtendimento, payload.aso_liberado);
   }
 
   // Endpoint do tipo DELETE para excluir definitivamente um agendamento usando colaborador e data
@@ -119,6 +177,13 @@ export class AgendamentosController {
       observacoes?: string;
       observacoes_laboratorial?: string;
       foto_obs?: string;
+      compareceu?: boolean;
+      preco?: number;
+      valor?: number;
+      metodo_pagamento?: string;
+      data_pagamento?: string;
+      aso_liberado?: string;
+      prioridade?: boolean;
     }
   ) {
     return this.agendamentosService.create(payload);

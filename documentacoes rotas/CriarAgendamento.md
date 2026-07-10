@@ -29,13 +29,22 @@ Este documento detalha o endpoint responsável por criar novos agendamentos e re
   "obs_agendamento": "Chegar com 10 min de antecedência", 
   "observacoes": "Paciente com quadro prévio de labirintite", 
   "observacoes_laboratorial": "Jejum rigoroso de 12 horas", 
-  "avulso": false
+  "avulso": false,
+  "compareceu": true,
+  "valor": 150.50,
+  "metodo_pagamento": "PIX",
+  "data_pagamento": "2026-07-09T14:30:00Z"
 }
 ```
 * 🔹 **`colaborador_id`** *(opcional)*: UUID do colaborador. Se `avulso=true`, pode ser nulo caso o backend vá registrar depois.
 * 🔹 **`nome_avulso`** *(opcional)*: Nome digitado em caso de paciente avulso que não estava previamente cadastrado na listagem.
 * 🔹 **`exames`** *(obrigatório)*: Array numérico com os IDs dos procedimentos mapeados a serem executados.
 * 🔹 **`avulso`**: Flag booleana que define o contexto do agendamento (modelo do colaborador).
+* 🔹 **`compareceu`**: (Booleano) Indicador de presença. Gravado unicamente na `Sala 1`.
+* 🔹 **`valor`**: (Número Decimal) Preço final da transação. Gravado unicamente na `Sala 1`.
+* 🔹 **`metodo_pagamento`**: (String) O método do pagamento, como "PIX", "Cartão", "Dinheiro". Gravado unicamente na `Sala 1`.
+* 🔹 **`data_pagamento`**: (String/Timestamptz) Data e hora do pagamento. Gravado unicamente na `Sala 1`.
+* 🔹 **`prioridade`**: (Booleano) Define se o atendimento possui prioridade. Gravado em todas as salas.
 * 🔹 **Demais campos**: São injetados diretamente na tabela `agendamentos` de cada sala roteada.
 
 **⚙️ O que faz no banco de dados e API:**

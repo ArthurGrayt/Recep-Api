@@ -5,12 +5,18 @@ import { Logger } from '@nestjs/common';
 // Importa os módulos necessários para criar a documentação do Swagger
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+import { urlencoded, json } from 'express';
+
 async function bootstrap() {
   // Cria uma instância do Logger para a classe bootstrap
   const logger = new Logger('Bootstrap');
 
   // Inicializa a aplicação NestJS com o AppModule raiz
   const app = await NestFactory.create(AppModule);
+
+  // Aumenta o limite de payload para permitir o envio de arquivos base64 (ex: ASO em PDF)
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ extended: true, limit: '50mb' }));
 
   // Habilita CORS para permitir que o Front-end (Next.js) acesse a API
   app.enableCors();

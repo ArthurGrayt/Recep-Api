@@ -12,31 +12,32 @@ export class EmpresasService {
   // Injeta o SupabaseService via construtor
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  // Método assíncrono para buscar empresas com suporte a pesquisa por razão social
-  async buscar(search: string) {
-    // Registra no log o termo de busca recebido
-    this.logger.log(`Buscando empresas com o termo: ${search}`);
+  // Método assíncrono para buscar empresas com suporte a pesquisa por razão social e paginação
+  async buscar(search?: string, page: number = 1, limit: number = 10) {
+    // Registra no log o termo de busca e paginação recebidos
+    this.logger.log(`Buscando empresas com o termo: ${search}, page: ${page}, limit: ${limit}`);
 
     // Obtém o cliente do Supabase
     const supabase = this.supabaseService.getClient();
 
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     // Inicia a query na tabela 'empresa_cliente' selecionando id e razao_social
     let query = supabase
       .from('empresa_cliente')
-      .select('id, razao_social')
+      .select('id, razao_social', { count: 'exact' })
       // Ordena alfabeticamente pela razão social
       .order('razao_social', { ascending: true })
-      // Limita a 15 resultados para não sobrecarregar o payload
-      .limit(15);
+      .range(from, to);
 
-    // Se um termo de busca válido foi fornecido, aplica o filtro ILIKE (case-insensitive)
+    // Se um termo de busca válido foi fornecido, aplica o filtro ILIKE
     if (search && search.trim() !== '') {
-      // Busca registros cuja razão social contenha o termo em qualquer posição
       query = query.ilike('razao_social', `%${search.trim()}%`);
     }
 
     // Executa a query e desestrutura o resultado
-    const { data, error } = await query;
+    const { data, error, count } = await query;
 
     // Se ocorrer algum erro na consulta
     if (error) {
@@ -46,7 +47,15 @@ export class EmpresasService {
       throw new Error(`Erro ao buscar empresas: ${error.message}`);
     }
 
-    // Retorna a lista de empresas encontradas
-    return data;
+    // Retorna a lista de empresas encontradas e metadados de paginação
+    return {
+      data,
+      meta: {
+        total: count || 0,
+        page,
+        limit,
+        totalPages: Math.ceil((count || 0) / limit),
+      }
+    };
   }
 }

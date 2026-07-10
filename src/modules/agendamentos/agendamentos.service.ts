@@ -50,10 +50,47 @@ export class AgendamentosService {
     return publicData.publicUrl;
   }
 
-  // Método assíncrono para buscar agendamentos com paginação e filtro de datas e sala
-  async findAll(page: number, limit: number, dataInicial?: string, dataFinal?: string, sala?: number) {
+  // Helper para fazer upload de arquivos ASO para o Supabase Storage
+  private async uploadAsoFile(supabase: any, base64File: string, prefixId: string): Promise<string> {
+    const match = base64File.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (!match) {
+      throw new Error('Formato de arquivo inválido. Esperado data:[mime_type];base64,...');
+    }
+
+    const contentType = match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+    let ext = 'pdf';
+    if (contentType.includes('pdf')) ext = 'pdf';
+    else if (contentType.includes('png')) ext = 'png';
+    else if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = 'jpg';
+    
+    const filename = `${prefixId}_${Date.now()}.${ext}`;
+
+    const { data, error } = await supabase
+      .storage
+      .from('ASOS')
+      .upload(filename, buffer, {
+        contentType,
+        upsert: true
+      });
+
+    if (error) {
+      this.logger.error(`Erro ao fazer upload do ASO: ${error.message}`);
+      throw new Error(`Erro ao salvar o ASO: ${error.message}`);
+    }
+
+    const { data: publicData } = supabase
+      .storage
+      .from('ASOS')
+      .getPublicUrl(filename);
+
+    return publicData.publicUrl;
+  }
+
+  // Método assíncrono para buscar agendamentos com paginação e filtro de datas, sala e adicionais
+  async findAll(page: number, limit: number, dataInicial?: string, dataFinal?: string, sala?: number, filters?: any) {
     // Registra no log que a busca por agendamentos foi iniciada com os parâmetros informados
-    this.logger.log(`Buscando agendamentos - Página: ${page}, Limite: ${limit}, Inicial: ${dataInicial}, Final: ${dataFinal}, Sala: ${sala}`);
+    this.logger.log(`Buscando agendamentos - Página: ${page}, Limite: ${limit}, Inicial: ${dataInicial}, Final: ${dataFinal}, Sala: ${sala}, Filtros: ${JSON.stringify(filters || {})}`);
 
     // Obtém o cliente do Supabase para realizar a consulta
     const supabase = this.supabaseService.getClient();
@@ -114,6 +151,82 @@ export class AgendamentosService {
       // Se houver apenas a data final (sem data inicial), busca tudo até essa data
       query = query.lte('data_atendimento', dataFinal);
     }
+    // Aplica os filtros diretos na tabela agendamentos, se existirem
+    if (filters) {
+      if (filters.metodo_pagamento) {
+        query = query.eq('metodo_pagamento', filters.metodo_pagamento);
+      }
+      if (filters.tipo_exame) {
+        query = query.ilike('tipo', `%${filters.tipo_exame}%`);
+      }
+      if (filters.rac_qtd_cobrar !== undefined) {
+        query = query.eq('rac_qtd_cobrar', Number(filters.rac_qtd_cobrar));
+      }
+      if (filters.aso_qtd_cobrar !== undefined) {
+        query = query.eq('aso_qtd_cobrar', Number(filters.aso_qtd_cobrar));
+      }
+      if (filters.aso_liberado) {
+        if (filters.aso_liberado === 'null') {
+          query = query.is('aso_liberado', null);
+        } else {
+          // Se não for 'null', busca os que POSSUEM data (não nulos)
+          query = query.not('aso_liberado', 'is', null);
+        }
+      }
+      
+      // Filtros hierárquicos: Empresa, Unidade e Cargo
+      if (filters.empresa_id || filters.unidade_id || filters.cargo_id) {
+        let colabQuery = supabase.from('colaborador_cargo_unidade_setor')
+          .select(`
+            colaborador_id,
+            cargo_setor_unidade!inner (
+              cargo${filters.cargo_id ? '!inner' : ''} (id, nome),
+              unidade_setor${filters.empresa_id || filters.unidade_id ? '!inner' : ''} (
+                unidade_cliente${filters.empresa_id || filters.unidade_id ? '!inner' : ''} (
+                  id, razao_social,
+                  empresa_cliente${filters.empresa_id ? '!inner' : ''} (id, razao_social)
+                )
+              )
+            )
+          `)
+          .eq('ativo', true);
+
+        if (filters.empresa_id) {
+          if (!isNaN(Number(filters.empresa_id))) {
+            colabQuery = colabQuery.eq('cargo_setor_unidade.unidade_setor.unidade_cliente.empresa_cliente.id', Number(filters.empresa_id));
+          } else {
+            colabQuery = colabQuery.ilike('cargo_setor_unidade.unidade_setor.unidade_cliente.empresa_cliente.razao_social', `%${filters.empresa_id}%`);
+          }
+        }
+        if (filters.unidade_id) {
+          if (!isNaN(Number(filters.unidade_id))) {
+            colabQuery = colabQuery.eq('cargo_setor_unidade.unidade_setor.unidade_cliente.id', Number(filters.unidade_id));
+          } else {
+            colabQuery = colabQuery.ilike('cargo_setor_unidade.unidade_setor.unidade_cliente.razao_social', `%${filters.unidade_id}%`);
+          }
+        }
+        if (filters.cargo_id) {
+          if (!isNaN(Number(filters.cargo_id))) {
+            colabQuery = colabQuery.eq('cargo_setor_unidade.cargo.id', Number(filters.cargo_id));
+          } else {
+            colabQuery = colabQuery.ilike('cargo_setor_unidade.cargo.nome', `%${filters.cargo_id}%`);
+          }
+        }
+
+        const { data: colabsData, error: errColab } = await colabQuery;
+        if (errColab) {
+          this.logger.error(`Erro ao filtrar colaboradores: ${errColab.message}`);
+          throw new Error(`Erro ao filtrar colaboradores: ${errColab.message}`);
+        }
+
+        const validColabIds = colabsData ? colabsData.map((c: any) => c.colaborador_id) : [];
+        if (validColabIds.length === 0) {
+          return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+        }
+        
+        query = query.in('colaborador_id', validColabIds);
+      }
+    }
 
     // Executa a consulta aguardando o retorno dos dados, possíveis erros e a contagem total
     const { data, error, count } = await query;
@@ -166,6 +279,57 @@ export class AgendamentosService {
         limit,
         totalPages: Math.ceil((count || 0) / limit),
       }
+    };
+  }
+
+  // Método para buscar estatísticas de presença
+  async getPresencaStats(data_inicial?: string, data_final?: string) {
+    this.logger.log(`Buscando estatísticas de presença - Inicial: ${data_inicial}, Final: ${data_final}`);
+    const supabase = this.supabaseService.getClient();
+
+    let queryTotal = supabase
+      .from('agendamentos')
+      .select('*', { count: 'exact', head: true })
+      .eq('sala', 1);
+      
+    let queryPresentes = supabase
+      .from('agendamentos')
+      .select('*', { count: 'exact', head: true })
+      .eq('sala', 1)
+      .eq('compareceu', true);
+
+    if (data_inicial) {
+      if (data_final) {
+        queryTotal = queryTotal.gte('data_atendimento', data_inicial).lte('data_atendimento', data_final);
+        queryPresentes = queryPresentes.gte('data_atendimento', data_inicial).lte('data_atendimento', data_final);
+      } else {
+        queryTotal = queryTotal.eq('data_atendimento', data_inicial);
+        queryPresentes = queryPresentes.eq('data_atendimento', data_inicial);
+      }
+    } else if (data_final) {
+        queryTotal = queryTotal.lte('data_atendimento', data_final);
+        queryPresentes = queryPresentes.lte('data_atendimento', data_final);
+    }
+
+    const [resTotal, resPresentes] = await Promise.all([queryTotal, queryPresentes]);
+
+    if (resTotal.error) {
+      this.logger.error(`Erro ao buscar total: ${resTotal.error.message}`);
+      throw new Error(`Erro ao buscar total: ${resTotal.error.message}`);
+    }
+    if (resPresentes.error) {
+      this.logger.error(`Erro ao buscar presentes: ${resPresentes.error.message}`);
+      throw new Error(`Erro ao buscar presentes: ${resPresentes.error.message}`);
+    }
+
+    const total = resTotal.count || 0;
+    const presentes = resPresentes.count || 0;
+    const ausentes = total - presentes;
+
+    return {
+      presentes,
+      ausentes,
+      total
     };
   }
 
@@ -381,6 +545,14 @@ export class AgendamentosService {
     if (camposUpdate.observacoes !== undefined) camposSala1.observacoes = camposUpdate.observacoes;
     // Se observação laboratorial foi enviada, adiciona às propriedades da sala 1
     if (camposUpdate.observacoes_laboratorial !== undefined) camposSala1.observacoes_laboratorial = camposUpdate.observacoes_laboratorial;
+    // Se preço/valor e método de pagamento foram enviados, adiciona à sala 1
+    if (camposUpdate.preco !== undefined) camposSala1.valor = camposUpdate.preco;
+    if (camposUpdate.valor !== undefined) camposSala1.valor = camposUpdate.valor; // fallback
+    if (camposUpdate.metodo_pagamento !== undefined) camposSala1.metodo_pagamento = camposUpdate.metodo_pagamento;
+    // Se data aso_liberado foi enviada, adiciona à sala 1
+    if (camposUpdate.aso_liberado !== undefined) camposSala1.aso_liberado = camposUpdate.aso_liberado;
+    // Se data de pagamento foi enviada, adiciona à sala 1
+    if (camposUpdate.data_pagamento !== undefined) camposSala1.data_pagamento = camposUpdate.data_pagamento;
     
     // Processamento da imagem foto_obs
     if (camposUpdate.foto_obs !== undefined) {
@@ -720,6 +892,59 @@ export class AgendamentosService {
   }
 
 
+  // Método assíncrono para atualizar ou remover a URL do ASO na sala 1
+  async updateAso(colaborador_id: string, data_atendimento: string, payload: { aso_file?: string; remove?: boolean }) {
+    this.logger.log(`Atualizando ASO para o colaborador: ${colaborador_id} na data: ${data_atendimento}`);
+    const supabase = this.supabaseService.getClient();
+
+    let asoUrl = null;
+
+    if (payload.remove) {
+      asoUrl = null;
+    } else if (payload.aso_file && payload.aso_file.startsWith('data:')) {
+      const urlSegura = `${colaborador_id}_${data_atendimento}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      asoUrl = await this.uploadAsoFile(supabase, payload.aso_file, urlSegura);
+    } else if (payload.aso_file && payload.aso_file.startsWith('http')) {
+      asoUrl = payload.aso_file;
+    } else {
+      return { message: 'Nenhuma alteração realizada no ASO' };
+    }
+
+    const { error } = await supabase
+      .from('agendamentos')
+      .update({ aso_url: asoUrl })
+      .eq('colaborador_id', colaborador_id)
+      .eq('data_atendimento', data_atendimento)
+      .eq('sala', 1);
+
+    if (error) {
+      this.logger.error(`Erro ao atualizar ASO: ${error.message}`);
+      throw new Error(`Erro ao atualizar ASO: ${error.message}`);
+    }
+
+    return { message: 'ASO atualizado com sucesso', aso_url: asoUrl };
+  }
+
+  // Método assíncrono para atualizar a data do aso_liberado na sala 1
+  async liberarAso(colaborador_id: string, data_atendimento: string, aso_liberado: string | null) {
+    this.logger.log(`Atualizando liberação de ASO para o colaborador: ${colaborador_id} na data: ${data_atendimento}`);
+    const supabase = this.supabaseService.getClient();
+
+    const { error } = await supabase
+      .from('agendamentos')
+      .update({ aso_liberado })
+      .eq('colaborador_id', colaborador_id)
+      .eq('data_atendimento', data_atendimento)
+      .eq('sala', 1);
+
+    if (error) {
+      this.logger.error(`Erro ao atualizar data de liberação do ASO: ${error.message}`);
+      throw new Error(`Erro ao atualizar data de liberação do ASO: ${error.message}`);
+    }
+
+    return { message: 'Data de liberação do ASO atualizada com sucesso', aso_liberado };
+  }
+
   // Interface para o novo payload rico do front-end
   async create(payload: { 
     colaborador_id?: string; 
@@ -740,11 +965,40 @@ export class AgendamentosService {
     observacoes?: string;
     observacoes_laboratorial?: string;
     foto_obs?: string;
+    compareceu?: boolean;
+    preco?: number;
+    valor?: number;
+    metodo_pagamento?: string;
+    data_pagamento?: string;
+    aso_liberado?: string;
+    prioridade?: boolean;
   }) {
     this.logger.log(`Criando agendamento para o colaborador ${payload.colaborador_id || 'Avulso'}`);
     
     const supabase = this.supabaseService.getClient();
     
+    // Define a data do atendimento com base no que foi enviado ou como hoje
+    const dataAtendimento = payload.data_atendimento || new Date().toISOString().split('T')[0];
+
+    // Validação contra duplicação silenciosa de agendamentos
+    if (payload.colaborador_id) {
+      const { data: agendamentoDuplicado, error: errDuplicado } = await supabase
+        .from('agendamentos')
+        .select('id')
+        .eq('colaborador_id', payload.colaborador_id)
+        .eq('data_atendimento', dataAtendimento)
+        .limit(1);
+
+      if (errDuplicado) {
+        this.logger.error(`Erro ao verificar duplicação: ${errDuplicado.message}`);
+        throw new Error(`Erro ao verificar duplicação: ${errDuplicado.message}`);
+      }
+
+      if (agendamentoDuplicado && agendamentoDuplicado.length > 0) {
+        throw new Error(`Já existe um agendamento para este colaborador na data ${dataAtendimento}. Utilize a edição para modificar.`);
+      }
+    }
+
     // 1. Buscar os procedimentos para descobrir as categorias de cada um
     const { data: procedimentos, error: errProc } = await supabase
       .from('procedimentos')
@@ -779,8 +1033,7 @@ export class AgendamentosService {
       procedimentosPorSala[1] = [];
     }
     
-    // Define a data do atendimento com base no que foi enviado ou como hoje
-    const dataAtendimento = payload.data_atendimento || new Date().toISOString().split('T')[0];
+    // 3.5 Processar upload de foto, caso exista um base64
     
     // 3.5 Processar upload de foto, caso exista um base64
     let fotoUrl: string | null = null;
@@ -803,12 +1056,18 @@ export class AgendamentosService {
         data_atendimento: dataAtendimento,
         tipo: payload.tipo || null,
         unidade: payload.unidade ?? null,
+        compareceu: payload.compareceu ?? false,
+        prioridade: payload.prioridade ?? false,
         // Campos de faturamento e observações vão EXCLUSIVAMENTE para a sala 1
         aso_qtd_cobrar: salaNum === 1 ? (payload.aso_qtd_cobrar ?? null) : null,
         rac_qtd_cobrar: salaNum === 1 ? (payload.rac_qtd_cobrar ?? null) : null,
         obs_agendamento: salaNum === 1 ? (payload.obs_agendamento || null) : null,
         observacoes: salaNum === 1 ? (payload.observacoes || null) : null,
         observacoes_laboratorial: salaNum === 1 ? (payload.observacoes_laboratorial || null) : null,
+        valor: salaNum === 1 ? (payload.preco ?? payload.valor ?? null) : null,
+        metodo_pagamento: salaNum === 1 ? (payload.metodo_pagamento || null) : null,
+        data_pagamento: salaNum === 1 ? (payload.data_pagamento || null) : null,
+        aso_liberado: salaNum === 1 ? (payload.aso_liberado || null) : null,
         foto_obs: salaNum === 1 ? fotoUrl : null,
       };
     });

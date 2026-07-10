@@ -26,9 +26,15 @@ export class CargosController {
   })
   // Define um endpoint GET na rota base /cargos
   @Get()
-  // Método assíncrono que recebe o parâmetro de busca opcional da query string
-  async buscar(@Query('search') search: string) {
+  // Método assíncrono que recebe o parâmetro de busca opcional da query string e paginação
+  async buscar(
+    @Query('search') search?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    const pageNumber = page ? Number(page) : 1;
+    const limitNumber = limit ? Number(limit) : 10;
     // Repassa o termo de busca para o service e retorna o resultado
-    return this.cargosService.buscar(search);
+    return this.cargosService.buscar(search, pageNumber, limitNumber);
   }
 }

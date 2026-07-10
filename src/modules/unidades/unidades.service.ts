@@ -12,26 +12,27 @@ export class UnidadesService {
   // Injeta o SupabaseService via construtor
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  // Método assíncrono para buscar unidades com suporte a pesquisa e filtro por empresa
-  async buscar(search: string, empresa_id?: number) {
-    // Registra no log o termo de busca e filtro recebidos
-    this.logger.log(`Buscando unidades com o termo: ${search}, empresa_id: ${empresa_id}`);
+  // Método assíncrono para buscar unidades com suporte a pesquisa, filtro por empresa e paginação
+  async buscar(search?: string, empresa_id?: number, page: number = 1, limit: number = 10) {
+    // Registra no log o termo de busca, filtro e paginação recebidos
+    this.logger.log(`Buscando unidades com o termo: ${search}, empresa_id: ${empresa_id}, page: ${page}, limit: ${limit}`);
 
     // Obtém o cliente do Supabase
     const supabase = this.supabaseService.getClient();
 
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     // Inicia a query na tabela 'unidade_cliente' selecionando id, razao_social e empresa_id
     let query = supabase
       .from('unidade_cliente')
-      .select('id, razao_social, empresa_cliente_id')
+      .select('id, razao_social, empresa_cliente_id', { count: 'exact' })
       // Ordena alfabeticamente pela razão social
       .order('razao_social', { ascending: true })
-      // Limita a 15 resultados para não sobrecarregar o payload
-      .limit(15);
+      .range(from, to);
 
-    // Se um termo de busca válido foi fornecido, aplica o filtro ILIKE (case-insensitive)
+    // Se um termo de busca válido foi fornecido, aplica o filtro ILIKE
     if (search && search.trim() !== '') {
-      // Busca registros cuja razão social contenha o termo em qualquer posição
       query = query.ilike('razao_social', `%${search.trim()}%`);
     }
 
@@ -41,7 +42,7 @@ export class UnidadesService {
     }
 
     // Executa a query e desestrutura o resultado
-    const { data, error } = await query;
+    const { data, error, count } = await query;
 
     // Se ocorrer algum erro na consulta
     if (error) {
@@ -51,7 +52,15 @@ export class UnidadesService {
       throw new Error(`Erro ao buscar unidades: ${error.message}`);
     }
 
-    // Retorna a lista de unidades encontradas
-    return data;
+    // Retorna a lista de unidades encontradas e metadados de paginação
+    return {
+      data,
+      meta: {
+        total: count || 0,
+        page,
+        limit,
+        totalPages: Math.ceil((count || 0) / limit),
+      }
+    };
   }
 }

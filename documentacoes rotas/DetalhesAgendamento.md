@@ -53,6 +53,10 @@ GET /agendamentos/colaborador/:id/data/:data
   "status": "pendente",
   "data_atendimento": "2026-07-07",
   "tipo": "Admissional",
+  "metodo_pagamento": "PIX",
+  "data_pagamento": "2026-07-09T14:30:00Z",
+  "aso_liberado": null,
+  "foto_obs": "https://url-supabase.com/foto123.jpg",
   "unidade": 42,
   "aso_qtd_cobrar": 1,
   "rac_qtd_cobrar": 0,
@@ -111,5 +115,10 @@ GET /agendamentos/colaborador/:id/data/:data
 ## ⚠️ Notas importantes
 
 - O `?fields` filtra apenas **campos de primeiro nível** do objeto (ex: `colaboradores`, `exames_feitos`, `status`). Não é possível filtrar subcampos internos do `colaboradores`.
+- 🔹 **`valor` / `preco`**: Valor total cobrado.
+- 🔹 **`metodo_pagamento`**: O método utilizado (Dinheiro, PIX, etc).
+- 🔹 **`data_pagamento`**: A data do pagamento.
+- 🔹 **`aso_liberado`**: Data/hora em que o médico liberou o ASO.
+- 🔹 **`foto_obs`**: URL da imagem associada à observação médica (se houver).
 - O banco sempre executa o SELECT completo com todos os joins. O filtro é aplicado **em memória** no retorno — o ganho é na largura de banda do payload, não no processamento do banco.
 - Retorna `null` (404 implícito) caso não exista agendamento para o colaborador na data informada.
