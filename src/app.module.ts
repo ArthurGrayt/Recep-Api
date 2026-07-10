@@ -35,6 +35,8 @@ import { SetoresModule } from './modules/setores/setores.module';
 import { EmpresasModule } from './modules/empresas/empresas.module';
 // Importa o módulo de unidades para disponibilizar o GET /unidades
 import { UnidadesModule } from './modules/unidades/unidades.module';
+// Importa o módulo de autenticação
+import { AuthModule } from './modules/auth/auth.module';
 
 
 // Declara o módulo raiz da aplicação (AppModule)
@@ -62,6 +64,8 @@ import { UnidadesModule } from './modules/unidades/unidades.module';
     EmpresasModule,
     // Registra o módulo de busca de unidades clientes
     UnidadesModule,
+    // Registra o módulo de autenticação e rotas de login
+    AuthModule,
   ],
 
   // Registra os controllers padrão da aplicação

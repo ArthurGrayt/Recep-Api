@@ -1,11 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 // Importa a classe Logger do NestJS para emitir logs no terminal
-import { Logger } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 // Importa os módulos necessários para criar a documentação do Swagger
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { urlencoded, json } from 'express';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   // Cria uma instância do Logger para a classe bootstrap
@@ -14,12 +15,20 @@ async function bootstrap() {
   // Inicializa a aplicação NestJS com o AppModule raiz
   const app = await NestFactory.create(AppModule);
 
+  // Configura os cookies e validação global (necessário para o AuthModule e DTOs)
+  app.use(cookieParser());
+  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+
+
   // Aumenta o limite de payload para permitir o envio de arquivos base64 (ex: ASO em PDF)
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ extended: true, limit: '50mb' }));
 
-  // Habilita CORS para permitir que o Front-end (Next.js) acesse a API
-  app.enableCors();
+  // Habilita CORS para permitir que o Front-end (Next.js) acesse a API e trafegue cookies
+  app.enableCors({
+    origin: process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : ['http://localhost:3004', 'http://localhost:3000', 'http://localhost:3100'],
+    credentials: true, // Permite envio de cookies cross-origin
+  });
 
   // Configura as informações básicas da documentação Swagger
   const config = new DocumentBuilder()
