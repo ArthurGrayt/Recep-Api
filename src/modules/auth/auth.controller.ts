@@ -46,10 +46,7 @@ export class AuthController {
     
     res.cookie(COOKIE_NAME, result.object.accessToken, COOKIE_OPTIONS);
     
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { accessToken: _a, refreshToken: _r, ...safeUser } = result.object;
-    
-    return { ...result, object: safeUser };
+    return result;
   }
 
   @Post('register')
@@ -71,9 +68,7 @@ export class AuthController {
       res.cookie(COOKIE_NAME, result.object.accessToken, COOKIE_OPTIONS);
     }
     
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { accessToken: _a, refreshToken: _r, ...safeUser } = result.object;
-    return { ...result, object: safeUser };
+    return result;
   }
 
   @Post('forgot-password')

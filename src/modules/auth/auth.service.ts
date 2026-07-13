@@ -19,6 +19,8 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
+    this.logger.log(`Login bem-sucedido para o email: ${email}`);
+
     return {
       message: 'Login realizado com sucesso',
       object: {
