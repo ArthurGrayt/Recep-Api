@@ -1,8 +1,5 @@
-// Importa o decorator Injectable do NestJS para marcar a classe como um serviço
-import { Injectable, Logger } from '@nestjs/common';
-// Importa o SupabaseService para realizar consultas no banco de dados
+import { Injectable, Logger, NotFoundException, InternalServerErrorException } from '@nestjs/common';
 import { SupabaseService } from '../../supabase/supabase.service';
-// Importa o serviço de Salas para rotear os procedimentos
 import { SalasService } from '../salas/salas.service';
 
 // Marca a classe como um serviço injetável no sistema de injeção de dependências do NestJS
@@ -392,7 +389,7 @@ export class AgendamentosService {
       
     if (error) {
       this.logger.error(`Erro ao buscar detalhes do agendamento: ${error.message}`);
-      throw new Error(`Erro ao buscar detalhes do agendamento: ${error.message}`);
+      throw new InternalServerErrorException(`Erro ao buscar detalhes do agendamento: ${error.message}`);
     }
     
     if (!data || data.length === 0) {
@@ -506,13 +503,13 @@ export class AgendamentosService {
       // Registra o erro no log
       this.logger.error(`Erro ao buscar dados atuais do agendamento: ${errGetAtuais.message}`);
       // Lança uma exceção detalhando a falha
-      throw new Error(`Erro ao buscar dados atuais do agendamento: ${errGetAtuais.message}`);
+      throw new InternalServerErrorException(`Erro ao buscar dados atuais do agendamento: ${errGetAtuais.message}`);
     }
 
-    // Se a consulta não retornou nenhum agendamento
     if (!agendamentosAtuais || agendamentosAtuais.length === 0) {
+      this.logger.error(`Nenhum agendamento encontrado! Params -> colaborador_id: ${colaborador_id}, data_atendimento: ${data_atendimento}`);
       // Lança uma exceção indicando que o agendamento não existe
-      throw new Error('Nenhum agendamento encontrado para os parâmetros informados.');
+      throw new NotFoundException(`Nenhum agendamento encontrado para colaborador_id: ${colaborador_id} e data: ${data_atendimento}.`);
     }
 
     // Identifica o agendamento da sala 1 como base ou pega o primeiro disponível
@@ -581,7 +578,7 @@ export class AgendamentosService {
       // Se ocorrer erro na atualização geral
       if (errGerais) {
         // Lança uma exceção informando o erro do banco
-        throw new Error(`Erro ao atualizar campos gerais: ${errGerais.message}`);
+        throw new InternalServerErrorException(`Erro ao atualizar campos gerais: ${errGerais.message}`);
       }
     }
 
@@ -603,7 +600,7 @@ export class AgendamentosService {
       // Se ocorrer erro na atualização da sala 1
       if (errSala1) {
         // Lança uma exceção detalhando a falha
-        throw new Error(`Erro ao atualizar campos da Sala 1: ${errSala1.message}`);
+        throw new InternalServerErrorException(`Erro ao atualizar campos da Sala 1: ${errSala1.message}`);
       }
     }
 
@@ -623,7 +620,7 @@ export class AgendamentosService {
       // Se houver erro ao ler os agendamentos ativos
       if (errExistentes) {
         // Lança uma exceção
-        throw new Error(`Erro ao buscar agendamentos existentes para atualizar exames: ${errExistentes.message}`);
+        throw new InternalServerErrorException(`Erro ao buscar agendamentos existentes para atualizar exames: ${errExistentes.message}`);
       }
 
       // Busca os detalhes e categorias dos novos exames enviados
@@ -638,7 +635,7 @@ export class AgendamentosService {
       // Se houver erro ao buscar os procedimentos
       if (errProc) {
         // Lança uma exceção
-        throw new Error(`Erro ao buscar procedimentos para atualização: ${errProc.message}`);
+        throw new InternalServerErrorException(`Erro ao buscar lista de procedimentos (exames) informados: ${errProc.message}`);
       }
 
       // Obtém o mapa de categorias por sala
@@ -712,7 +709,7 @@ export class AgendamentosService {
         // Se ocorrer erro na inserção das salas
         if (errNovasSalas) {
           // Lança exceção explicativa
-          throw new Error(`Erro ao criar novos agendamentos de sala: ${errNovasSalas.message}`);
+          throw new InternalServerErrorException(`Erro ao criar novos agendamentos de sala: ${errNovasSalas.message}`);
         }
 
         // Adiciona as salas recém-criadas ao nosso mapa de relacionamento
@@ -741,7 +738,7 @@ export class AgendamentosService {
       // Se ocorrer erro ao limpar exames antigos
       if (errDelExames) {
         // Lança exceção
-        throw new Error(`Erro ao limpar exames antigos: ${errDelExames.message}`);
+        throw new InternalServerErrorException(`Erro ao limpar exames antigos: ${errDelExames.message}`);
       }
 
       // Se houver salas que ficaram vazias e precisam ser removidas
@@ -757,10 +754,10 @@ export class AgendamentosService {
           // Filtra pelos IDs identificados
           .in('id', idsParaRemover);
 
-        // Se houver erro ao excluir os agendamentos antigos
+        // Se houver erro ao deletar as salas obsoletas
         if (errDelAgend) {
           // Lança exceção
-          throw new Error(`Erro ao remover salas não utilizadas: ${errDelAgend.message}`);
+          throw new InternalServerErrorException(`Erro ao remover salas vazias: ${errDelAgend.message}`);
         }
 
         // Itera removendo as salas apagadas também do nosso mapa em memória
@@ -799,16 +796,16 @@ export class AgendamentosService {
       // Se houver novos vínculos de exames para inserir
       if (insertsExamesFeitos.length > 0) {
         // Insere os dados na tabela exames_feitos
-        const { error: errExamesIns } = await supabase
+        const { error: errInsertExames } = await supabase
           // Define a tabela
           .from('exames_feitos')
           // Insere a lista formatada
           .insert(insertsExamesFeitos);
 
-        // Se falhar a inserção dos exames
-        if (errExamesIns) {
-          // Lança uma exceção
-          throw new Error(`Erro ao inserir novos exames: ${errExamesIns.message}`);
+        // Se erro ao inserir os novos exames
+        if (errInsertExames) {
+          // Lança exceção explicativa
+          throw new InternalServerErrorException(`Erro ao re-inserir a lista de exames atualizada: ${errInsertExames.message}`);
         }
       }
     }
