@@ -18,6 +18,8 @@ async function bootstrap() {
   // Configura os cookies e validação global (necessário para o AuthModule e DTOs)
   app.use(cookieParser());
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+  app.setGlobalPrefix('api');
+
 
 
   // Aumenta o limite de payload para permitir o envio de arquivos base64 (ex: ASO em PDF)
