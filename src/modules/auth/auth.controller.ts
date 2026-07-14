@@ -18,7 +18,7 @@ import { UpdatePasswordDto } from './dto/update-password.dto';
 
 const COOKIE_NAME = 'access_token';
 const COOKIE_OPTIONS = {
-  httpOnly: true,
+  httpOnly: false, // Alterado para false para que o frontend consiga apagar ao deslogar
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict' as const,
   maxAge: 24 * 60 * 60 * 1000, 

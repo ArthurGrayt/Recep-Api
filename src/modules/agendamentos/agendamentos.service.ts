@@ -515,6 +515,11 @@ export class AgendamentosService {
     // Identifica o agendamento da sala 1 como base ou pega o primeiro disponível
     const baseAgendamento = agendamentosAtuais.find(a => a.sala === 1) || agendamentosAtuais[0];
 
+    // Verifica e atualiza os vínculos de cargo e setor, caso o usuário tenha alterado esses dados no formulário
+    if (camposUpdate.unidade_id && camposUpdate.setor_id && camposUpdate.funcao_id) {
+      await this.atualizarAlocacaoColaborador(supabase, colaborador_id, camposUpdate.unidade_id, camposUpdate.setor_id, camposUpdate.funcao_id);
+    }
+
     // Cria um objeto vazio para guardar as propriedades globais que afetam todas as salas
     const camposGerais: any = {};
     // Se a data de atendimento foi enviada, adiciona às propriedades gerais
@@ -726,19 +731,20 @@ export class AgendamentosService {
 
       // Cria uma lista contendo todos os IDs de agendamento do grupo
       const todosIdsAgendamentos = Array.from(agendamentosPorSalaExistentes.values());
+      
       // Deleta todos os exames vinculados anteriormente a esses agendamentos em exames_feitos
-      const { error: errDelExames } = await supabase
-        // Define a tabela exames_feitos
-        .from('exames_feitos')
-        // Deleta
-        .delete()
-        // Filtra pelos IDs dos agendamentos
-        .in('agendamento_id', todosIdsAgendamentos);
-
-      // Se ocorrer erro ao limpar exames antigos
-      if (errDelExames) {
-        // Lança exceção
-        throw new InternalServerErrorException(`Erro ao limpar exames antigos: ${errDelExames.message}`);
+      // Vamos deletar um por um para garantir que nenhuma constraint silenciosa de batch do supabase falhe
+      if (todosIdsAgendamentos.length > 0) {
+        for (const idAgendamento of todosIdsAgendamentos) {
+          const { error: errDelExames } = await supabase
+            .from('exames_feitos')
+            .delete()
+            .eq('agendamento_id', idAgendamento);
+            
+          if (errDelExames) {
+            throw new InternalServerErrorException(`Erro ao limpar exames antigos do agendamento ${idAgendamento}: ${errDelExames.message}`);
+          }
+        }
       }
 
       // Se houver salas que ficaram vazias e precisam ser removidas
@@ -746,18 +752,17 @@ export class AgendamentosService {
         // Mapeia as salas vazias para seus respectivos IDs no banco de dados
         const idsParaRemover = salasParaRemover.map(sala => agendamentosPorSalaExistentes.get(sala)!);
         // Deleta as linhas das salas obsoletas na tabela agendamentos
-        const { error: errDelAgend } = await supabase
-          // Define a tabela agendamentos
-          .from('agendamentos')
-          // Deleta
-          .delete()
-          // Filtra pelos IDs identificados
-          .in('id', idsParaRemover);
+        for (const idToRemove of idsParaRemover) {
+          const { error: errDelAgend } = await supabase
+            .from('agendamentos')
+            .delete()
+            .eq('id', idToRemove);
 
-        // Se houver erro ao deletar as salas obsoletas
-        if (errDelAgend) {
-          // Lança exceção
-          throw new InternalServerErrorException(`Erro ao remover salas vazias: ${errDelAgend.message}`);
+          // Se houver erro ao deletar as salas obsoletas
+          if (errDelAgend) {
+            // Lança exceção com detalhes de qual ID falhou
+            throw new InternalServerErrorException(`Erro ao remover sala vazia (ID: ${idToRemove}): ${errDelAgend.message}`);
+          }
         }
 
         // Itera removendo as salas apagadas também do nosso mapa em memória
@@ -946,14 +951,18 @@ export class AgendamentosService {
   async create(payload: { 
     colaborador_id?: string; 
     nome_avulso?: string;
-    avulso?: boolean;
     cpf?: string;
     data_nascimento?: string;
     sexo?: string;
     funcao?: string;
+    funcao_id?: number;
     setor?: string;
+    setor_id?: number;
+    empresa?: string;
+    empresa_id?: number;
     tipo?: string;
     unidade?: number;
+    unidade_id?: number;
     aso_qtd_cobrar?: number;
     rac_qtd_cobrar?: number;
     data_atendimento?: string;
@@ -1081,6 +1090,15 @@ export class AgendamentosService {
       throw new Error(`Erro ao criar agendamentos: ${errAgend.message}`);
     }
     
+    // Atualiza a alocação de cargo do colaborador, caso os IDs tenham sido informados
+    if (payload.colaborador_id && payload.unidade_id && payload.setor_id && payload.funcao_id) {
+      try {
+        await this.atualizarAlocacaoColaborador(supabase, payload.colaborador_id, payload.unidade_id, payload.setor_id, payload.funcao_id);
+      } catch (err) {
+        this.logger.warn(`Aviso: não foi possível atualizar alocação do colaborador ${payload.colaborador_id}: ${err.message}`);
+      }
+    }
+    
     // 5. Preparar inserts para a tabela exames_feitos (vinculando procedimento -> colaborador -> agendamento específico)
     const insertsExamesFeitos: any[] = [];
     
@@ -1115,5 +1133,75 @@ export class AgendamentosService {
       message: 'Agendamentos e exames registrados com sucesso',
       agendamentos: agendamentosCriados
     };
+  }
+
+  // Helper para atualizar o vínculo (job) do colaborador
+  private async atualizarAlocacaoColaborador(supabase: any, colaboradorId: string, unidadeId: number, setorId: number, cargoId: number) {
+    // 1. Procurar ou criar unidade_setor
+    let unidadeSetorId: number;
+    const { data: usData } = await supabase
+      .from('unidade_setor')
+      .select('id')
+      .eq('unidade_id', unidadeId)
+      .eq('setor_id', setorId)
+      .maybeSingle();
+
+    if (usData) {
+      unidadeSetorId = usData.id;
+    } else {
+      const { data: newUsData, error: errNewUs } = await supabase
+        .from('unidade_setor')
+        .insert({ unidade_id: unidadeId, setor_id: setorId })
+        .select('id').single();
+      if (errNewUs) throw new InternalServerErrorException(`Erro ao criar unidade_setor: ${errNewUs.message}`);
+      unidadeSetorId = newUsData.id;
+    }
+
+    // 2. Procurar ou criar cargo_setor_unidade
+    let cargoSetorUnidadeId: number;
+    const { data: csuData } = await supabase
+      .from('cargo_setor_unidade')
+      .select('id')
+      .eq('unidade_setor_id', unidadeSetorId)
+      .eq('cargo_id', cargoId)
+      .maybeSingle();
+
+    if (csuData) {
+      cargoSetorUnidadeId = csuData.id;
+    } else {
+      const { data: newCsuData, error: errNewCsu } = await supabase
+        .from('cargo_setor_unidade')
+        .insert({ unidade_setor_id: unidadeSetorId, cargo_id: cargoId })
+        .select('id').single();
+      if (errNewCsu) throw new InternalServerErrorException(`Erro ao criar cargo_setor_unidade: ${errNewCsu.message}`);
+      cargoSetorUnidadeId = newCsuData.id;
+    }
+
+    // 3. Verificar alocação atual
+    const { data: alocacoesAtivas } = await supabase
+      .from('colaborador_cargo_unidade_setor')
+      .select('id, cargo_unidade_setor_id')
+      .eq('colaborador_id', colaboradorId)
+      .eq('ativo', true);
+
+    const alocacaoAtual = alocacoesAtivas && alocacoesAtivas.length > 0 ? alocacoesAtivas[0] : null;
+
+    if (!alocacaoAtual || alocacaoAtual.cargo_unidade_setor_id !== cargoSetorUnidadeId) {
+      if (alocacaoAtual) {
+        await supabase
+          .from('colaborador_cargo_unidade_setor')
+          .update({ ativo: false, data_fim: new Date().toISOString() })
+          .eq('id', alocacaoAtual.id);
+      }
+      
+      await supabase
+        .from('colaborador_cargo_unidade_setor')
+        .insert({
+          colaborador_id: colaboradorId,
+          cargo_unidade_setor_id: cargoSetorUnidadeId,
+          ativo: true,
+          data_inicio: new Date().toISOString()
+        });
+    }
   }
 }
