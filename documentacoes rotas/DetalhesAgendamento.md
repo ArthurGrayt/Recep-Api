@@ -28,14 +28,11 @@
 ### Exemplos de uso com `?fields`:
 
 ```
-# Somente dados do colaborador e exames (modo edição do card)
-GET /agendamentos/colaborador/:id/data/:data?fields=id,tipo,status,obs_agendamento,observacoes,observacoes_laboratorial,aso_qtd_cobrar,rac_qtd_cobrar,prioridade,exames_feitos,colaboradores
+# Somente dados do colaborador (modo edição do card)
+GET /agendamentos/colaborador/:id/data/:data?fields=id,tipo,status,obs_agendamento,observacoes,observacoes_laboratorial,aso_qtd_cobrar,rac_qtd_cobrar,prioridade,colaboradores
 
 # Somente para preencher o header do card
 GET /agendamentos/colaborador/:id/data/:data?fields=id,data_atendimento,tipo,colaboradores
-
-# Somente a lista de exames
-GET /agendamentos/colaborador/:id/data/:data?fields=exames_feitos
 
 # Tudo (sem filtro — comportamento padrão)
 GET /agendamentos/colaborador/:id/data/:data
@@ -78,24 +75,7 @@ GET /agendamentos/colaborador/:id/data/:data
     "unidade_id": 3,
     "empresa": "Construtora XYZ Ltda",
     "empresa_id": 2
-  },
-  "exames_feitos": [
-    {
-      "id": 105,
-      "proced_id": 1,
-      "procedimentos": { "nome": "Avaliação Clínica" }
-    },
-    {
-      "id": 106,
-      "proced_id": 2,
-      "procedimentos": { "nome": "Acuidade Visual" }
-    },
-    {
-      "id": 107,
-      "proced_id": 9,
-      "procedimentos": { "nome": "Hemograma Completo" }
-    }
-  ]
+  }
 }
 ```
 
@@ -105,8 +85,7 @@ GET /agendamentos/colaborador/:id/data/:data
 
 1. **Busca dos agendamentos:** Acessa a tabela `agendamentos` filtrando por `colaborador_id` e `data_atendimento`, obtendo todos os registros de todas as salas daquele dia.
 2. **JOIN do colaborador:** Faz um join completo com `colaboradores` → `colaborador_cargo_unidade_setor` → `cargo_setor_unidade` → `cargo`, `setor`, `unidade_cliente`, `empresa_cliente` para trazer todos os dados planificados.
-3. **JOIN dos exames:** Faz um join com `exames_feitos` e `procedimentos` de **todas as salas** do dia.
-4. **Agregação:** Agrupa os exames de todas as salas num único array `exames_feitos` e usa os dados da **Sala 1** como base do retorno (pois ela armazena observações financeiras/médicas).
+3. **Agregação Base:** Usa os dados da **Sala 1** como base do retorno (pois ela armazena observações financeiras/médicas).
 5. **Planificação do colaborador:** O objeto `colaboradores` retornado já vem com os dados navegados e planificados — sem aninhamento de joins — no mesmo formato do `GET /colaboradores/:id`.
 6. **Filtro de campos (opcional):** Se o query param `?fields=` for informado, o retorno é reduzido a apenas os campos solicitados antes de enviar ao cliente.
 
@@ -114,7 +93,7 @@ GET /agendamentos/colaborador/:id/data/:data
 
 ## ⚠️ Notas importantes
 
-- O `?fields` filtra apenas **campos de primeiro nível** do objeto (ex: `colaboradores`, `exames_feitos`, `status`). Não é possível filtrar subcampos internos do `colaboradores`.
+- O `?fields` filtra apenas **campos de primeiro nível** do objeto (ex: `colaboradores`, `status`). Não é possível filtrar subcampos internos do `colaboradores`.
 - 🔹 **`valor` / `preco`**: Valor total cobrado.
 - 🔹 **`metodo_pagamento`**: O método utilizado (Dinheiro, PIX, etc).
 - 🔹 **`data_pagamento`**: A data do pagamento.

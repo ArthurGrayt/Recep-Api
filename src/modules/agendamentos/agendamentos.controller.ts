@@ -89,6 +89,21 @@ export class AgendamentosController {
     return this.agendamentosService.findByColaboradorAndDate(colaboradorId, dataAtendimento, camposSolicitados);
   }
 
+  @ApiOperation({
+    summary: 'Buscar exames feitos do agendamento',
+    description: 'Busca apenas a lista de exames feitos vinculados ao colaborador nos agendamentos informados. Passe os IDs separados por vírgula no query param ids.'
+  })
+  @Get('colaborador/:colaborador_id/exames')
+  async findExamesByColaboradorAndAgendamentos(
+    @Param('colaborador_id') colaboradorId: string,
+    @Query('ids') agendamentosIds: string,
+  ) {
+    console.log(`[API] Buscando exames -> Colaborador: ${colaboradorId} | Agendamentos IDs: ${agendamentosIds}`);
+    const exames = await this.agendamentosService.findExamesByColaboradorAndAgendamentos(colaboradorId, agendamentosIds);
+    console.log(`[API] Exames encontrados:`, JSON.stringify(exames, null, 2));
+    return exames;
+  }
+
   // Endpoint do tipo PATCH para atualizar campos parciais do agendamento usando colaborador e data
   @ApiOperation({
     summary: 'Atualizar agendamento',

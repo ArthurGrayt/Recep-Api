@@ -375,13 +375,6 @@ export class AgendamentosService {
               )
             )
           )
-        ),
-        exames_feitos (
-          id,
-          proced_id,
-          procedimentos (
-            nome
-          )
         )
       `)
       .eq('colaborador_id', colaborador_id)
@@ -400,9 +393,6 @@ export class AgendamentosService {
     // Usamos a sala 1 como base ou a primeira que retornar caso não haja sala 1.
     const baseAgendamento = data.find(a => a.sala === 1) || data[0];
     
-    // Agrupa todos os exames feitos em todas as salas neste dia
-    const todosExames = data.flatMap(a => a.exames_feitos || []);
-    
     // Extrai e planifica os dados do colaborador navegando pelos relacionamentos de forma segura,
     // eliminando a necessidade de uma segunda chamada ao GET /colaboradores/:id
     const colabRaw: any = baseAgendamento.colaboradores || {};
@@ -417,6 +407,9 @@ export class AgendamentosService {
     const unidadeId = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.id || null;
     const empresaNome = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.empresa_cliente?.razao_social || null;
     const empresaId = alocacaoAtual.cargo_setor_unidade?.unidade_setor?.unidade_cliente?.empresa_cliente?.id || null;
+
+    // Mapeia todos os IDs de todas as salas retornadas
+    const agendamentosIds = data.map(a => a.id);
 
     // Monta o objeto do colaborador já planificado (mesmo formato do GET /colaboradores/:id)
     const colaboradorPlanificado = {
@@ -437,7 +430,7 @@ export class AgendamentosService {
     const respostaCompleta: Record<string, any> = {
       ...baseAgendamento,
       colaboradores: colaboradorPlanificado,
-      exames_feitos: todosExames,
+      agendamentos_ids: agendamentosIds, // Array de IDs de todas as salas para uso no frontend
     };
 
     // Se nenhum campo foi solicitado, retorna o objeto inteiro sem filtro
@@ -458,6 +451,40 @@ export class AgendamentosService {
     return respostaFiltrada;
   }
 
+  async findExamesByColaboradorAndAgendamentos(colaborador_id: string, agendamentos_ids: string) {
+    const supabase = this.supabaseService.getClient();
+
+    // Transforma a string "100,101,91" em um array numérico [100, 101, 91]
+    const idsArray = agendamentos_ids.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id));
+
+    // Log para confirmar quais IDs chegaram e foram parseados
+    this.logger.log(`[SERVICE] IDs parseados para busca de exames: ${JSON.stringify(idsArray)}`);
+
+    // Busca os exames_feitos usando apenas a FK agendamento_id (os IDs jão garantem o vínculo com o colaborador)
+    const { data: exames, error: examesErr, status, statusText } = await supabase
+      .from('exames_feitos')
+      .select(`
+        id,
+        proced_id,
+        agendamento_id,
+        procedimentos (
+          nome
+        )
+      `)
+      .in('agendamento_id', idsArray);
+
+    // Log para mostrar resultado bruto que veio do banco
+    this.logger.log(`[SERVICE] HTTP Status: ${status} ${statusText}`);
+    this.logger.log(`[SERVICE] Resultado bruto do banco: ${JSON.stringify(exames)}`);
+    if (examesErr) this.logger.error(`[SERVICE] Erro Supabase: ${JSON.stringify(examesErr)}`);
+
+    if (examesErr) {
+      this.logger.error(`Erro ao buscar exames feitos: ${examesErr.message}`);
+      throw new InternalServerErrorException(`Erro ao buscar exames feitos: ${examesErr.message}`);
+    }
+
+    return exames || [];
+  }
 
   // Método assíncrono para atualizar dados parciais ou exames de um agendamento agrupado por colaborador e data
   async updateByColaboradorAndDate(
@@ -615,8 +642,8 @@ export class AgendamentosService {
       const { data: agendamentosExistentes, error: errExistentes } = await supabase
         // Define a tabela agendamentos
         .from('agendamentos')
-        // Seleciona o ID e a Sala dos registros ativos
-        .select('id, sala')
+        // Seleciona todos os dados para ter acesso aos campos do baseAgendamento
+        .select('*')
         // Filtra pelo colaborador
         .eq('colaborador_id', colaborador_id)
         // Usa a data atualizada (ou a original se não mudou)
@@ -771,6 +798,8 @@ export class AgendamentosService {
           agendamentosPorSalaExistentes.delete(sala);
         });
       }
+
+
 
       // Prepara os novos inserts na tabela exames_feitos
       const insertsExamesFeitos: any[] = [];
