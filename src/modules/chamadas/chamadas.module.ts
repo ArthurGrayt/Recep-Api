@@ -1,5 +1,6 @@
 // Importa o decorator Module do NestJS
 import { Module } from '@nestjs/common';
+import { QuadroChamadaGateway } from './quadro-chamada.gateway'; // Import atualizado
 
 // Importa o controller de chamadas com todos os endpoints do fluxo
 import { ChamadasController } from './chamadas.controller';
@@ -16,6 +17,7 @@ import { TelaChamadaGateway } from './tela-chamada.gateway';
   controllers: [ChamadasController],
 
   // Registra o service como provider para injeção de dependência no controller
-  providers: [ChamadasService, TelaChamadaGateway],
+  providers: [ChamadasService, TelaChamadaGateway, QuadroChamadaGateway],
 })
 export class ChamadasModule {}
+

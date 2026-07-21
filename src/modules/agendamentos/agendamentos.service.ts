@@ -105,6 +105,7 @@ export class AgendamentosService {
         *,
         colaboradores (
           nome,
+          cpf,
           colaborador_cargo_unidade_setor (
             ativo,
             cargo_setor_unidade (
@@ -260,6 +261,7 @@ export class AgendamentosService {
       return {
         ...agendamentoLimpo,
         colaborador_nome: colaborador.nome || null,
+        colaborador_cpf: colaborador.cpf || null,
         colaborador_cargo: cargoNome,
         colaborador_setor: setorNome,
         colaborador_unidade: unidadeNome,

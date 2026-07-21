@@ -9,6 +9,7 @@ import { SalvarTicketDto } from './dto/salvar-ticket.dto';
 
 // Importa o Gateway de WebSockets
 import { TelaChamadaGateway } from './tela-chamada.gateway';
+import { QuadroChamadaGateway } from './quadro-chamada.gateway';
 
 // Marca a classe como um serviço injetável pelo NestJS
 @Injectable()
@@ -19,7 +20,8 @@ export class ChamadasService {
   // Injeta o SupabaseService via construtor para ter acesso ao cliente do banco
   constructor (
     private readonly supabaseService: SupabaseService,
-    private readonly telaChamadaGateway: TelaChamadaGateway
+    private readonly telaChamadaGateway: TelaChamadaGateway,
+    private readonly quadroChamadaGateway: QuadroChamadaGateway
   ) {}
 
   // ─────────────────────────────────────────────────────────────────
@@ -216,6 +218,7 @@ export class ChamadasService {
 
     // Emite o evento para a TV através do WebSocket (Aviso visual para o colaborador ir ao balcão)
     this.telaChamadaGateway.emitirChamadaSemAgendamento(identificador, 'Recepção');
+    this.quadroChamadaGateway.notificarAtualizacaoFila('chamar', { salaId: 1, ticketId: id_ticket });
 
     return { mensagem: 'Atendimento sem agendamento chamado na recepção com sucesso' };
   }
@@ -240,6 +243,7 @@ export class ChamadasService {
       .eq('disp', false); // Só reverte se realmente já foi chamado
 
     if (error) throw new Error(`Erro ao reverter chamada sem agendamento: ${error.message}`);
+    this.quadroChamadaGateway.notificarAtualizacaoFila('reverter-chamada', { salaId: 1, ticketId: id_ticket });
 
     return { mensagem: 'Chamada sem agendamento revertida. O colaborador voltou a aguardar.' };
   }
@@ -418,6 +422,7 @@ export class ChamadasService {
     }
 
     this.logger.log(`Ticket ${identificador} em atendimento na sala ${sala_id}`);
+    this.quadroChamadaGateway.notificarAtualizacaoFila('chamar', { salaId: sala_id, ticketId: id_ticket });
     return { mensagem: `Colaborador chamado para a sala ${sala_id}`, data };
   }
 
@@ -470,6 +475,7 @@ export class ChamadasService {
     this.logger.log(
       `Atendimento do ticket ${identificador} na sala ${sala_id} finalizado. Status alterado para 3 e arquivado.`,
     );
+    this.quadroChamadaGateway.notificarAtualizacaoFila('finalizar', { salaId: sala_id, ticketId: id_ticket });
     return {
       mensagem: `Atendimento finalizado na sala ${sala_id} e salvo no histórico.`,
     };
@@ -544,6 +550,9 @@ export class ChamadasService {
 
     if (error) throw new Error(`Erro ao reverter chamada: ${error.message}`);
 
+    this.logger.log(`Reversão de chamada concluída na sala ${sala_id} para o ticket ${identificador}`);
+    this.quadroChamadaGateway.notificarAtualizacaoFila('reverter-chamada', { salaId: sala_id, ticketId: id_ticket });
+
     return { mensagem: 'Chamada revertida com sucesso. O colaborador voltou a aguardar.' };
   }
 
@@ -570,8 +579,9 @@ export class ChamadasService {
 
       // Se a consulta retornou algum registro, a sala está ocupada — bloqueia a reversão
       if (ocupantes && ocupantes.length > 0) {
-        const msgErro = `Não é possível reverter. A sala ${sala_id} já está atendendo o colaborador de ticket ${ocupantes[0].ticket_text}. Finalize o atendimento atual antes de reverter.`;
-        this.logger.warn(msgErro);
+        // Se a sala estiver ocupada, não permite a reversão
+        const msgErro = `Ocupada: ${ocupantes[0].ticket_text}`;
+        this.logger.warn(`Reversão de finalização negada: ${msgErro}`);
         throw new BadRequestException(msgErro);
       }
     }
@@ -601,6 +611,9 @@ export class ChamadasService {
 
       if (errBloqueio) throw new Error(`Erro ao re-bloquear salas médicas: ${errBloqueio.message}`);
     }
+
+    this.logger.log(`Reversão de finalização concluída na sala ${sala_id} para o ticket ${identificador}`);
+    this.quadroChamadaGateway.notificarAtualizacaoFila('reverter-finalizacao', { salaId: sala_id, ticketId: id_ticket });
 
     return { mensagem: 'Finalização revertida com sucesso. O colaborador voltou para em atendimento.' };
   }
@@ -713,5 +726,31 @@ export class ChamadasService {
 
     // Retorna a lista totalmente reunida e ordenada
     return todosReunidos;
+  }
+
+  async chamarPacienteSala(salaId: number, ticketId: string) {
+    // ... lógica para alterar o status da sala para CHAMADO (1) ...
+    // Após sucesso no BD:
+    this.quadroChamadaGateway.notificarAtualizacaoFila('chamar', { salaId, ticketId });
+  }
+  
+  async atenderPacienteSala(salaId: number, ticketId: string) {
+    // ... lógica para alterar o status para EM ATENDIMENTO (2) ...
+    this.quadroChamadaGateway.notificarAtualizacaoFila('atender', { salaId, ticketId });
+  }
+  
+  async finalizarPacienteSala(salaId: number, ticketId: string) {
+    // ... lógica para alterar o status para FINALIZADO (3) ...
+    this.quadroChamadaGateway.notificarAtualizacaoFila('finalizar', { salaId, ticketId });
+  }
+  
+  async reverterChamada(salaId: number, ticketId: string) {
+    // ... lógica para reverter status de CHAMADO para AGUARDANDO (0) ...
+    this.quadroChamadaGateway.notificarAtualizacaoFila('reverter-chamada', { salaId, ticketId });
+  }
+  
+  async reverterFinalizacao(salaId: number, ticketId: string) {
+    // ... lógica para reverter status de FINALIZADO de volta para EM ATENDIMENTO (2) ...
+    this.quadroChamadaGateway.notificarAtualizacaoFila('reverter-finalizacao', { salaId, ticketId });
   }
 }
