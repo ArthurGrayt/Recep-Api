@@ -28,7 +28,7 @@ async function bootstrap() {
 
   // Habilita CORS para permitir que o Front-end (Next.js) acesse a API e trafegue cookies
   app.enableCors({
-    origin: process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : ['http://localhost:3004', 'http://localhost:3000', 'http://localhost:3100'],
+    origin: process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : ['http://localhost:3004', 'http://localhost:3000', 'http://localhost:3100','https://gama-recepv2-psi.vercel.app/'],
     credentials: true, // Permite envio de cookies cross-origin
   });
 
