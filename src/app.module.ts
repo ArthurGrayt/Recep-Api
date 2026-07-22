@@ -37,6 +37,16 @@ import { EmpresasModule } from './modules/empresas/empresas.module';
 import { UnidadesModule } from './modules/unidades/unidades.module';
 // Importa o módulo de autenticação
 import { AuthModule } from './modules/auth/auth.module';
+// Importa o módulo de CRUD de Empresa para disponibilizar o POST /crud/empresa
+import { EmpresaCrudModule } from './modules/CRUD Estrutura/Empresa/empresa.module';
+// Importa o módulo de CRUD de Unidade para disponibilizar o POST /criar/unidade
+import { UnidadeCrudModule } from './modules/CRUD Estrutura/Unidade/unidade.module';
+// Importa o módulo de CRUD de Setor para disponibilizar o POST /criar/setor
+import { SetorCrudModule } from './modules/CRUD Estrutura/Setor/setor.module';
+// Importa o módulo de CRUD de Cargo para disponibilizar o POST /criar/cargo
+import { CargoCrudModule } from './modules/CRUD Estrutura/Cargo/cargo.module';
+// Importa o módulo de CRUD de Colaborador para disponibilizar o POST /criar/colaborador
+import { ColaboradorModule } from './modules/CRUD Estrutura/Colaborador/colaborador.module';
 
 
 // Declara o módulo raiz da aplicação (AppModule)
@@ -66,6 +76,16 @@ import { AuthModule } from './modules/auth/auth.module';
     UnidadesModule,
     // Registra o módulo de autenticação e rotas de login
     AuthModule,
+    // Registra o módulo de CRUD de Empresa com a rota POST /crud/empresa
+    EmpresaCrudModule,
+    // Registra o módulo de CRUD de Unidade com a rota POST /criar/unidade
+    UnidadeCrudModule,
+    // Registra o módulo de CRUD de Setor com a rota POST /criar/setor
+    SetorCrudModule,
+    // Registra o módulo de CRUD de Cargo com a rota POST /criar/cargo
+    CargoCrudModule,
+    // Registra o módulo de CRUD de Colaborador com a rota POST /criar/colaborador
+    ColaboradorModule,
   ],
 
   // Registra os controllers padrão da aplicação

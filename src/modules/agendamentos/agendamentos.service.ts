@@ -551,38 +551,109 @@ export class AgendamentosService {
 
     // Cria um objeto vazio para guardar as propriedades globais que afetam todas as salas
     const camposGerais: any = {};
-    // Se a data de atendimento foi enviada, adiciona às propriedades gerais
     if (camposUpdate.data_atendimento !== undefined) camposGerais.data_atendimento = camposUpdate.data_atendimento;
-    // Se o tipo do agendamento foi enviado, adiciona às propriedades gerais
     if (camposUpdate.tipo !== undefined) camposGerais.tipo = camposUpdate.tipo;
-    // Se a unidade foi enviada, adiciona às propriedades gerais
     if (camposUpdate.unidade !== undefined) camposGerais.unidade = camposUpdate.unidade;
-    // Se o status foi enviado, adiciona às propriedades gerais
     if (camposUpdate.status !== undefined) camposGerais.status = camposUpdate.status;
-    // Se compareceu foi enviado, adiciona às propriedades gerais
-    if (camposUpdate.compareceu !== undefined) camposGerais.compareceu = camposUpdate.compareceu;
-    // Se a prioridade foi enviada, adiciona às propriedades gerais
     if (camposUpdate.prioridade !== undefined) camposGerais.prioridade = camposUpdate.prioridade;
+    
+    if (camposUpdate.compareceu !== undefined) {
+      camposGerais.compareceu = camposUpdate.compareceu;
+      if (camposUpdate.compareceu === false) {
+        camposGerais.hora_chegada = null;
+        
+        // Remove hora_chegada também na fila_agendamentos
+        try {
+          const inicioDia = `${data_atendimento}T00:00:00.000Z`;
+          const fimDia = `${data_atendimento}T23:59:59.999Z`;
+
+          const { data: ticketData } = await supabase
+            .from('ticket_chamadas')
+            .select('id_ticket')
+            .eq('id_colaborador', colaborador_id)
+            .gte('created_at', inicioDia)
+            .lte('created_at', fimDia)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (ticketData?.id_ticket) {
+            await supabase
+              .from('fila_agendamentos')
+              .update({ hora_chegada: null })
+              .eq('id_ticket', ticketData.id_ticket);
+          }
+        } catch (e) {
+          this.logger.warn(`Não foi possível limpar hora_chegada na fila_agendamentos: ${e.message}`);
+        }
+      } else if (camposUpdate.compareceu === true && camposUpdate.hora_chegada) {
+        // Se compareceu virou true e foi enviada uma hora_chegada
+        camposGerais.hora_chegada = camposUpdate.hora_chegada;
+        
+        try {
+          const inicioDia = `${data_atendimento}T00:00:00.000Z`;
+          const fimDia = `${data_atendimento}T23:59:59.999Z`;
+
+          const { data: ticketData } = await supabase
+            .from('ticket_chamadas')
+            .select('id_ticket')
+            .eq('id_colaborador', colaborador_id)
+            .gte('created_at', inicioDia)
+            .lte('created_at', fimDia)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (ticketData?.id_ticket) {
+            await supabase
+              .from('fila_agendamentos')
+              .update({ hora_chegada: camposUpdate.hora_chegada })
+              .eq('id_ticket', ticketData.id_ticket);
+          }
+        } catch (e) {
+          this.logger.warn(`Não foi possível setar hora_chegada na fila_agendamentos: ${e.message}`);
+        }
+      }
+    } else if (camposUpdate.hora_chegada) {
+      // Se apenas a hora_chegada foi enviada e o compareceu não mudou (já deve estar true)
+      camposGerais.hora_chegada = camposUpdate.hora_chegada;
+      
+      try {
+        const inicioDia = `${data_atendimento}T00:00:00.000Z`;
+        const fimDia = `${data_atendimento}T23:59:59.999Z`;
+
+        const { data: ticketData } = await supabase
+          .from('ticket_chamadas')
+          .select('id_ticket')
+          .eq('id_colaborador', colaborador_id)
+          .gte('created_at', inicioDia)
+          .lte('created_at', fimDia)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (ticketData?.id_ticket) {
+          await supabase
+            .from('fila_agendamentos')
+            .update({ hora_chegada: camposUpdate.hora_chegada })
+            .eq('id_ticket', ticketData.id_ticket);
+        }
+      } catch (e) {
+        this.logger.warn(`Não foi possível setar hora_chegada na fila_agendamentos: ${e.message}`);
+      }
+    }
 
     // Cria um objeto vazio para os campos que pertencem estritamente à sala 1 (recepção/financeiro)
     const camposSala1: any = {};
-    // Se a quantidade de ASO a cobrar foi enviada, adiciona às propriedades da sala 1
     if (camposUpdate.aso_qtd_cobrar !== undefined) camposSala1.aso_qtd_cobrar = camposUpdate.aso_qtd_cobrar;
-    // Se a quantidade de RAC a cobrar foi enviada, adiciona às propriedades da sala 1
     if (camposUpdate.rac_qtd_cobrar !== undefined) camposSala1.rac_qtd_cobrar = camposUpdate.rac_qtd_cobrar;
-    // Se observação de agendamento foi enviada, adiciona às propriedades da sala 1
     if (camposUpdate.obs_agendamento !== undefined) camposSala1.obs_agendamento = camposUpdate.obs_agendamento;
-    // Se observação clínica foi enviada, adiciona às propriedades da sala 1
     if (camposUpdate.observacoes !== undefined) camposSala1.observacoes = camposUpdate.observacoes;
-    // Se observação laboratorial foi enviada, adiciona às propriedades da sala 1
     if (camposUpdate.observacoes_laboratorial !== undefined) camposSala1.observacoes_laboratorial = camposUpdate.observacoes_laboratorial;
-    // Se preço/valor e método de pagamento foram enviados, adiciona à sala 1
     if (camposUpdate.preco !== undefined) camposSala1.valor = camposUpdate.preco;
-    if (camposUpdate.valor !== undefined) camposSala1.valor = camposUpdate.valor; // fallback
+    if (camposUpdate.valor !== undefined) camposSala1.valor = camposUpdate.valor;
     if (camposUpdate.metodo_pagamento !== undefined) camposSala1.metodo_pagamento = camposUpdate.metodo_pagamento;
-    // Se data aso_liberado foi enviada, adiciona à sala 1
     if (camposUpdate.aso_liberado !== undefined) camposSala1.aso_liberado = camposUpdate.aso_liberado;
-    // Se data de pagamento foi enviada, adiciona à sala 1
     if (camposUpdate.data_pagamento !== undefined) camposSala1.data_pagamento = camposUpdate.data_pagamento;
     
     // Processamento da imagem foto_obs
@@ -591,49 +662,38 @@ export class AgendamentosService {
         const urlSegura = `${colaborador_id}_${data_atendimento}`.replace(/[^a-zA-Z0-9_-]/g, '_');
         camposSala1.foto_obs = await this.uploadFotoObs(supabase, camposUpdate.foto_obs, urlSegura);
       } else {
-        // Se for string vazia, null, ou uma URL existente
         camposSala1.foto_obs = camposUpdate.foto_obs;
       }
     }
 
-    // Se houver algum campo global para atualizar
+    // Para evitar o erro "tuple to be updated was already modified by an operation triggered by the current command",
+    // faremos a atualização em duas etapas separadas garantindo que a mesma linha não seja afetada duas vezes.
+    
+    // 1. Atualiza TODAS AS SALAS EXCETO A SALA 1 com camposGerais
     if (Object.keys(camposGerais).length > 0) {
-      // Atualiza todas as linhas de agendamentos desse colaborador na data especificada
       const { error: errGerais } = await supabase
-        // Define a tabela agendamentos
         .from('agendamentos')
-        // Envia as propriedades gerais alteradas
         .update(camposGerais)
-        // Filtra pelo colaborador
         .eq('colaborador_id', colaborador_id)
-        // Filtra pela data original
-        .eq('data_atendimento', data_atendimento);
+        .eq('data_atendimento', data_atendimento)
+        .neq('sala', 1);
 
-      // Se ocorrer erro na atualização geral
       if (errGerais) {
-        // Lança uma exceção informando o erro do banco
-        throw new InternalServerErrorException(`Erro ao atualizar campos gerais: ${errGerais.message}`);
+        throw new InternalServerErrorException(`Erro ao atualizar campos gerais nas salas: ${errGerais.message}`);
       }
     }
 
-    // Se houver algum campo específico da Sala 1 para atualizar
-    if (Object.keys(camposSala1).length > 0) {
-      // Atualiza apenas a linha da sala 1
+    // 2. Atualiza APENAS A SALA 1 juntando camposGerais + camposSala1
+    const updateSala1 = { ...camposGerais, ...camposSala1 };
+    if (Object.keys(updateSala1).length > 0) {
       const { error: errSala1 } = await supabase
-        // Define a tabela agendamentos
         .from('agendamentos')
-        // Envia os dados financeiros e observações
-        .update(camposSala1)
-        // Filtra pelo colaborador
+        .update(updateSala1)
         .eq('colaborador_id', colaborador_id)
-        // Filtra pela nova data (se foi alterada) ou pela data antiga
-        .eq('data_atendimento', camposGerais.data_atendimento || data_atendimento)
-        // Filtra especificamente pela sala 1
+        .eq('data_atendimento', data_atendimento)
         .eq('sala', 1);
 
-      // Se ocorrer erro na atualização da sala 1
       if (errSala1) {
-        // Lança uma exceção detalhando a falha
         throw new InternalServerErrorException(`Erro ao atualizar campos da Sala 1: ${errSala1.message}`);
       }
     }
@@ -1009,6 +1069,7 @@ export class AgendamentosService {
     data_pagamento?: string;
     aso_liberado?: string;
     prioridade?: boolean;
+    hora_chegada?: string | null;
   }) {
     this.logger.log(`Criando agendamento para o colaborador ${payload.colaborador_id || 'Avulso'}`);
     
@@ -1095,6 +1156,7 @@ export class AgendamentosService {
         unidade: payload.unidade ?? null,
         compareceu: payload.compareceu ?? false,
         prioridade: payload.prioridade ?? false,
+        hora_chegada: payload.hora_chegada || null,
         // Campos de faturamento e observações vão EXCLUSIVAMENTE para a sala 1
         aso_qtd_cobrar: salaNum === 1 ? (payload.aso_qtd_cobrar ?? null) : null,
         rac_qtd_cobrar: salaNum === 1 ? (payload.rac_qtd_cobrar ?? null) : null,
@@ -1234,5 +1296,49 @@ export class AgendamentosService {
           data_inicio: new Date().toISOString()
         });
     }
+  }
+
+  async updateHoraChegada(colaborador_id: string, data_atendimento: string, hora_chegada: string | null) {
+    const supabase = this.supabaseService.getClient();
+
+    const { data, error } = await supabase
+      .from('agendamentos')
+      .update({ hora_chegada })
+      .eq('colaborador_id', colaborador_id)
+      .eq('data_atendimento', data_atendimento);
+
+    if (error) {
+      this.logger.error(`Erro ao atualizar hora de chegada: ${error.message}`);
+      throw new InternalServerErrorException(`Erro ao atualizar hora de chegada: ${error.message}`);
+    }
+
+    // Tenta atualizar também na fila_agendamentos se o ticket já existir
+    try {
+      // 1. Busca o id_ticket mais recente do colaborador gerado no dia do atendimento
+      const inicioDia = `${data_atendimento}T00:00:00.000Z`;
+      const fimDia = `${data_atendimento}T23:59:59.999Z`;
+
+      const { data: ticketData } = await supabase
+        .from('ticket_chamadas')
+        .select('id_ticket')
+        .eq('id_colaborador', colaborador_id)
+        .gte('created_at', inicioDia)
+        .lte('created_at', fimDia)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (ticketData?.id_ticket) {
+        // 2. Atualiza a hora_chegada na fila correspondente
+        await supabase
+          .from('fila_agendamentos')
+          .update({ hora_chegada })
+          .eq('id_ticket', ticketData.id_ticket);
+      }
+    } catch (e) {
+      this.logger.warn(`Não foi possível atualizar hora_chegada na fila_agendamentos: ${e.message}`);
+    }
+
+    return { message: 'Hora de chegada atualizada com sucesso', hora_chegada };
   }
 }

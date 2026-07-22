@@ -149,6 +149,19 @@ export class AgendamentosController {
     return this.agendamentosService.liberarAso(colaboradorId, dataAtendimento, payload.aso_liberado);
   }
 
+  @ApiOperation({
+    summary: 'Atualizar Hora Chegada',
+    description: 'Atualiza o horário de chegada de um agendamento.'
+  })
+  @Patch('colaborador/:colaborador_id/data/:data_atendimento/hora-chegada')
+  async updateHoraChegada(
+    @Param('colaborador_id') colaboradorId: string,
+    @Param('data_atendimento') dataAtendimento: string,
+    @Body() payload: { hora_chegada: string | null }
+  ) {
+    return this.agendamentosService.updateHoraChegada(colaboradorId, dataAtendimento, payload.hora_chegada);
+  }
+
   // Endpoint do tipo DELETE para excluir definitivamente um agendamento usando colaborador e data
   @ApiOperation({
     summary: 'Deletar agendamento',

@@ -661,6 +661,7 @@ export class ChamadasService {
       status: item.disp, // Mapeado de 'disp'
       tipo_fila: 'fila_atendimentos',
       id_ticket: item.id_ticket,
+      hora_chegada: item.hora_chegada,
       salas_agendadas: [] // Atendimentos sem agendamento não possuem múltiplas salas
     }));
 
@@ -678,6 +679,7 @@ export class ChamadasService {
           tipo_fila: 'fila_agendamentos',
           id_ticket: curr.id_ticket,
           nome: curr.nome, // Inclui o nome do colaborador
+          hora_chegada: curr.hora_chegada,
           salas_agendadas: [] // Array para guardar todas as salas deste colaborador
         };
       }
